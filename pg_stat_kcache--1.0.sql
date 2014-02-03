@@ -29,4 +29,6 @@ SELECT dbid, datname,
   JOIN pg_database
     ON oid=dbid;
 
-
+GRANT SELECT ON pg_stat_kcache TO public;
+GRANT ALL ON FUNCTION pg_stat_kcache() TO public;
+REVOKE ALL ON FUNCTION pg_stat_kcache_reset() FROM public;
