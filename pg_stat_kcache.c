@@ -473,7 +473,7 @@ pg_stat_kcache(PG_FUNCTION_ARGS)
 
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 		entry++;
-		j++;
+		i++;
 	}
 
 	LWLockRelease(pgsk->lock);
