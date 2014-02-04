@@ -36,7 +36,7 @@ PG_MODULE_MAGIC;
 static const uint32 PGSK_FILE_HEADER = 0x0d756e0e;
 
 struct rusage own_rusage;
-int64	current_reads;
+int64	current_reads = 0;
 
 /*
  * Statistics per database
