@@ -31,7 +31,7 @@ PG_MODULE_MAGIC;
 
 #define PGSK_DUMP_FILE  "global/pg_stat_kcache.stat"
 #define MAX_DB_ENTRIES 200
-#define PG_STAT_KCACHE_COLS 2
+#define PG_STAT_KCACHE_COLS 3
 
 static const uint32 PGSK_FILE_HEADER = 0x0d756e0e;
 
@@ -44,7 +44,7 @@ int64	current_reads = 0;
 typedef struct pgskEntry
 {
 	Oid			dbid;	/* database Oid */
-	int64		reads;		/* number of physical reads per database */
+	int64		reads[CMD_NOTHING];		/* number of physical reads per database and per statement kind */
 	slock_t		mutex;		/* protects the counters only */
 } pgskEntry;
 
@@ -83,7 +83,7 @@ static void pgsk_shmem_startup(void);
 static void pgsk_shmem_shutdown(int code, Datum arg);
 static void pgsk_ExecutorEnd(QueryDesc *queryDesc);
 static void entry_reset(void);
-static void entry_store(Oid dbid, int64 reads);
+static void entry_store(Oid dbid, int64 reads, CmdType operation);
 
 void
 _PG_init(void)
@@ -117,7 +117,7 @@ pgsk_shmem_startup(void)
 {
 	bool		found;
 	FILE		*file;
-	int			i;
+	int			i,t;
 	uint32		header;
 	int32		num;
 	pgskEntry	*entry;
@@ -185,7 +185,10 @@ pgsk_shmem_startup(void)
 			goto error;
 
 		entry->dbid = buffer->dbid;
-		entry->reads = buffer->reads;
+		for (t = 0; t < CMD_NOTHING; t++)
+		{
+			entry->reads[t] = buffer->reads[t];
+		}
 		/* don't initialize spinlock, already done */
 		entry++;
 	}
@@ -304,7 +307,7 @@ static Size pgsk_memsize(void)
  */
 
 static void
-entry_store(Oid dbid, int64 reads)
+entry_store(Oid dbid, int64 reads, CmdType operation)
 {
 	int i = 0;
 	pgskEntry *entry;
@@ -319,7 +322,7 @@ entry_store(Oid dbid, int64 reads)
 		if (entry->dbid == dbid || entry->dbid == InvalidOid) {
 			SpinLockAcquire(&entry->mutex);
 			entry->dbid = dbid;
-			entry->reads += reads;
+			entry->reads[operation] += reads;
 			SpinLockRelease(&entry->mutex);
 			found = true;
 			break;
@@ -340,7 +343,7 @@ entry_store(Oid dbid, int64 reads)
 
 static void entry_reset(void)
 {
-	int i;
+	int i,t;
 	pgskEntry  *entry;
 
 	LWLockAcquire(pgsk->lock, LW_EXCLUSIVE);
@@ -350,7 +353,8 @@ static void entry_reset(void)
 	for (i = 0; i < MAX_DB_ENTRIES ; i++)
 	{
 		entry->dbid = InvalidOid;
-		entry->reads = 0;
+		for(t = 0; t < CMD_NOTHING; t++)
+			entry->reads[t] = 0;
 		SpinLockInit(&entry->mutex);
 		entry++;
 	}
@@ -374,7 +378,7 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 	getrusage(RUSAGE_SELF, &own_rusage);
 
 	/* store current number of block reads */
-	entry_store(dbid, own_rusage.ru_inblock - current_reads);
+	entry_store(dbid, own_rusage.ru_inblock - current_reads, queryDesc->operation);
 	current_reads = own_rusage.ru_inblock;
 
 	/* give control back to PostgreSQL */
@@ -455,23 +459,54 @@ pg_stat_kcache(PG_FUNCTION_ARGS)
 	entry = pgskEntries;
 	while (i < MAX_DB_ENTRIES)
 	{
-		Datum           values[PG_STAT_KCACHE_COLS];
+		int t;
+		for (t = 0; t < CMD_NOTHING; t++)
+		{
+			Datum           values[PG_STAT_KCACHE_COLS];
 			bool            nulls[PG_STAT_KCACHE_COLS];
 			int                     j = 0;
 
-		memset(values, 0, sizeof(values));
-		memset(nulls, 0, sizeof(nulls));
+			memset(values, 0, sizeof(values));
+			memset(nulls, 0, sizeof(nulls));
 
-		if (entry->dbid == InvalidOid)
-			break;
-		SpinLockAcquire(&entry->mutex);
-		values[j++] = ObjectIdGetDatum(entry->dbid);
-		values[j++] = Int64GetDatumFast(entry->reads);
-		SpinLockRelease(&entry->mutex);
+			if (entry->dbid == InvalidOid)
+				break;
+			SpinLockAcquire(&entry->mutex);
+			values[j++] = ObjectIdGetDatum(entry->dbid);
+			values[j++] = Int64GetDatumFast(entry->reads[t]);
+			switch (t)
+			{
+				case CMD_UNKNOWN:
+					values[j++] = CStringGetTextDatum("UNKNOWN");
+				break;
+				case CMD_SELECT:
+					values[j++] = CStringGetTextDatum("SELECT");
+				break;
+				case CMD_UPDATE:
+					values[j++] = CStringGetTextDatum("UPDATE");
+				break;
+				case CMD_INSERT:
+					values[j++] = CStringGetTextDatum("INSERT");
+				break;
+				case CMD_DELETE:
+					values[j++] = CStringGetTextDatum("DELETE");
+				break;
+				case CMD_UTILITY:
+					values[j++] = CStringGetTextDatum("UTILITY");
+				break;
+				case CMD_NOTHING:
+					values[j++] = CStringGetTextDatum("NOTHING");
+				break;
+				default:
+					values[j++] = CStringGetTextDatum("ERROR");
+				break;
+			}
+			SpinLockRelease(&entry->mutex);
 
-		Assert(j == PG_STAT_PLAN_COLS);
+			Assert(j == PG_STAT_PLAN_COLS);
 
-		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+			tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+		}
 		entry++;
 		i++;
 	}
