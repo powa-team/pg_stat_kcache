@@ -35,7 +35,7 @@ PG_MODULE_MAGIC;
 
 static const uint32 PGSK_FILE_HEADER = 0x0d756e0e;
 
-struct rusage own_rusage;
+struct	rusage own_rusage;
 int64	current_reads = 0;
 
 /*
@@ -43,9 +43,9 @@ int64	current_reads = 0;
  */
 typedef struct pgskEntry
 {
-	Oid		dbid;	/* database Oid */
+	Oid			dbid;	/* database Oid */
 	int64		reads;		/* number of physical reads per database */
-        slock_t         mutex;                  /* protects the counters only */
+	slock_t		mutex;		/* protects the counters only */
 } pgskEntry;
 
 /*
@@ -53,8 +53,8 @@ typedef struct pgskEntry
  */
 typedef struct pgskSharedState
 {
-        LWLockId        lock;                   /* protects hashtable search/modification */
-        int                     query_size;             /* max query length in bytes */
+	LWLockId	lock;			/* protects hashtable search/modification */
+	int			query_size;		/* max query length in bytes */
 } pgskSharedState;
 
 
@@ -88,46 +88,46 @@ static void entry_store(Oid dbid, int64 reads);
 void
 _PG_init(void)
 {
-        if (!process_shared_preload_libraries_in_progress)
+	if (!process_shared_preload_libraries_in_progress)
 	{
 		elog(ERROR, "This module can only be loaded via shared_preload_libraries");
-                return;
+		return;
 	}
 
-        RequestAddinShmemSpace(pgsk_memsize());
-        RequestAddinLWLocks(1);
+	RequestAddinShmemSpace(pgsk_memsize());
+	RequestAddinLWLocks(1);
 
 	/* Install hook */
-        prev_shmem_startup_hook = shmem_startup_hook;
-        shmem_startup_hook = pgsk_shmem_startup;
+	prev_shmem_startup_hook = shmem_startup_hook;
+	shmem_startup_hook = pgsk_shmem_startup;
 	prev_ExecutorEnd = ExecutorEnd_hook;
-        ExecutorEnd_hook = pgsk_ExecutorEnd;
+	ExecutorEnd_hook = pgsk_ExecutorEnd;
 }
 
 void
 _PG_fini(void)
 {
 	/* uninstall hook */
-        ExecutorEnd_hook = prev_ExecutorEnd;
+	ExecutorEnd_hook = prev_ExecutorEnd;
 	shmem_startup_hook = prev_shmem_startup_hook;
 }
 
 static void
 pgsk_shmem_startup(void)
 {
-        bool            found;
+	bool		found;
 	FILE		*file;
-	int		i;
+	int			i;
 	uint32		header;
 	int32		num;
 	pgskEntry	*entry;
 	pgskEntry	*buffer = NULL;
 
-        if (prev_shmem_startup_hook)
-                prev_shmem_startup_hook();
+	if (prev_shmem_startup_hook)
+		prev_shmem_startup_hook();
 
-        /* reset in case this is a restart within the postmaster */
-        pgsk = NULL;
+	/* reset in case this is a restart within the postmaster */
+	pgsk = NULL;
 
 	/* Create or attach to the shared memory state */
 	LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);
@@ -137,35 +137,35 @@ pgsk_shmem_startup(void)
 					sizeof(pgskSharedState),
 					&found);
 
-        if (!found)
-        {
-                /* First time through ... */
-                pgsk->lock = LWLockAssign();
-        }
+	if (!found)
+	{
+		/* First time through ... */
+		pgsk->lock = LWLockAssign();
+	}
 
 	/* allocate stats shared memory structure */
 	pgskEntries = ShmemInitStruct("pg_stat_kcache stats",
 					sizeof(pgskEntry) * MAX_DB_ENTRIES,
 					&found);
 
-        if (!found)
-        {
+	if (!found)
+	{
 		entry_reset();
-        }
+	}
 
 	LWLockRelease(AddinShmemInitLock);
 
-        if (!IsUnderPostmaster)
-                on_shmem_exit(pgsk_shmem_shutdown, (Datum) 0);
+	if (!IsUnderPostmaster)
+		on_shmem_exit(pgsk_shmem_shutdown, (Datum) 0);
 
 	/* Load stat file, don't care about locking */
-        file = AllocateFile(PGSK_DUMP_FILE, PG_BINARY_R);
-        if (file == NULL)
-        {
-                if (errno == ENOENT)
-                        return;                         /* ignore not-found error */
-                goto error;
-        }
+	file = AllocateFile(PGSK_DUMP_FILE, PG_BINARY_R);
+	if (file == NULL)
+	{
+		if (errno == ENOENT)
+			return;                         /* ignore not-found error */
+		goto error;
+	}
 
 	buffer = (pgskEntry *) palloc(sizeof(pgskEntry));
 
@@ -190,14 +190,14 @@ pgsk_shmem_startup(void)
 		entry++;
 	}
 
-        pfree(buffer);
-        FreeFile(file);
+	pfree(buffer);
+	FreeFile(file);
 
-        /*
-         * Remove the file so it's not included in backups/replication slaves,
-         * etc. A new file will be written on next shutdown.
-         */
-        unlink(PGSK_DUMP_FILE);
+	/*
+	 * Remove the file so it's not included in backups/replication slaves,
+	 * etc. A new file will be written on next shutdown.
+	 */
+	unlink(PGSK_DUMP_FILE);
 
 	return;
 
@@ -240,7 +240,7 @@ pgsk_shmem_shutdown(int code, Datum arg)
 	if (fwrite(&PGSK_FILE_HEADER, sizeof(uint32), 1, file) != 1)
 		goto error;
 
-        entry = pgskEntries;
+	entry = pgskEntries;
 	num_entries = 0;
 	while (num_entries < MAX_DB_ENTRIES)
 	{
@@ -253,7 +253,7 @@ pgsk_shmem_shutdown(int code, Datum arg)
 	if (fwrite(&num_entries, sizeof(int32), 1, file) != 1)
 		goto error;
 
-        entry = pgskEntries;
+	entry = pgskEntries;
 	for (i = 0; i < num_entries; i++)
 	{
 		if (fwrite(entry, offsetof(pgskEntry, mutex), 1, file) != 1)
@@ -343,7 +343,7 @@ static void entry_reset(void)
 	int i;
 	pgskEntry  *entry;
 
-        LWLockAcquire(pgsk->lock, LW_EXCLUSIVE);
+	LWLockAcquire(pgsk->lock, LW_EXCLUSIVE);
 
 	/* Mark all entries with InvalidOid */
 	entry = pgskEntries;
@@ -355,7 +355,7 @@ static void entry_reset(void)
 		entry++;
 	}
 
-        LWLockRelease(pgsk->lock);
+	LWLockRelease(pgsk->lock);
 	return;
 }
 
@@ -379,9 +379,9 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 
 	/* give control back to PostgreSQL */
 	if (prev_ExecutorEnd)
-                prev_ExecutorEnd(queryDesc);
-        else
-                standard_ExecutorEnd(queryDesc);
+		prev_ExecutorEnd(queryDesc);
+	else
+		standard_ExecutorEnd(queryDesc);
  
 }
 
@@ -391,10 +391,10 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 Datum
 pg_stat_kcache_reset(PG_FUNCTION_ARGS)
 {
-        if (!pgsk)
-                ereport(ERROR,
-                                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                                 errmsg("pg_stat_kcache must be loaded via shared_preload_libraries")));
+	if (!pgsk)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("pg_stat_kcache must be loaded via shared_preload_libraries")));
 
 	entry_reset();
 	PG_RETURN_VOID();
@@ -412,52 +412,52 @@ pg_stat_kcache_session(PG_FUNCTION_ARGS)
 Datum
 pg_stat_kcache(PG_FUNCTION_ARGS)
 {
-        ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
-        MemoryContext per_query_ctx;
-        MemoryContext oldcontext;
-        pgskEntry  *entry;
-        TupleDesc       tupdesc;
-        Tuplestorestate *tupstore;
-	int i = 0;
+	ReturnSetInfo	*rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	MemoryContext	per_query_ctx;
+	MemoryContext	oldcontext;
+	pgskEntry		*entry;
+	TupleDesc		tupdesc;
+	Tuplestorestate	*tupstore;
+	int				i = 0;
 
 
-        if (!pgsk)
-                ereport(ERROR,
-                                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                                 errmsg("pg_stat_kcache must be loaded via shared_preload_libraries")));
+	if (!pgsk)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("pg_stat_kcache must be loaded via shared_preload_libraries")));
         /* check to see if caller supports us returning a tuplestore */
-        if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
-                ereport(ERROR,
-                                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                 errmsg("set-valued function called in context that cannot accept a set")));
-        if (!(rsinfo->allowedModes & SFRM_Materialize))
-                ereport(ERROR,
-                                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                 errmsg("materialize mode required, but it is not " \
-                                                "allowed in this context")));
+	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("set-valued function called in context that cannot accept a set")));
+	if (!(rsinfo->allowedModes & SFRM_Materialize))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("materialize mode required, but it is not " \
+							"allowed in this context")));
 
-        per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
-        oldcontext = MemoryContextSwitchTo(per_query_ctx);
+	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+	oldcontext = MemoryContextSwitchTo(per_query_ctx);
 
-        /* Build a tuple descriptor for our result type */
-        if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
-                elog(ERROR, "return type must be a row type");
+	/* Build a tuple descriptor for our result type */
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
 
-        tupstore = tuplestore_begin_heap(true, false, work_mem);
-        rsinfo->returnMode = SFRM_Materialize;
-        rsinfo->setResult = tupstore;
-        rsinfo->setDesc = tupdesc;
+	tupstore = tuplestore_begin_heap(true, false, work_mem);
+	rsinfo->returnMode = SFRM_Materialize;
+	rsinfo->setResult = tupstore;
+	rsinfo->setDesc = tupdesc;
 
-        MemoryContextSwitchTo(oldcontext);
+	MemoryContextSwitchTo(oldcontext);
 
-        LWLockAcquire(pgsk->lock, LW_SHARED);
+	LWLockAcquire(pgsk->lock, LW_SHARED);
 
 	entry = pgskEntries;
 	while (i < MAX_DB_ENTRIES)
 	{
 		Datum           values[PG_STAT_KCACHE_COLS];
-	        bool            nulls[PG_STAT_KCACHE_COLS];
-	        int                     j = 0;
+			bool            nulls[PG_STAT_KCACHE_COLS];
+			int                     j = 0;
 
 		memset(values, 0, sizeof(values));
 		memset(nulls, 0, sizeof(nulls));
@@ -476,11 +476,11 @@ pg_stat_kcache(PG_FUNCTION_ARGS)
 		j++;
 	}
 
-        LWLockRelease(pgsk->lock);
+	LWLockRelease(pgsk->lock);
 
-        /* clean up and return the tuplestore */
-        tuplestore_donestoring(tupstore);
+	/* clean up and return the tuplestore */
+	tuplestore_donestoring(tupstore);
 
-        return (Datum) 0;
+	return (Datum) 0;
 }
 
