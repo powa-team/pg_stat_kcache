@@ -9,7 +9,7 @@
 SET client_encoding = 'UTF8';
 SET check_function_bodies = true;
 
-CREATE FUNCTION pg_stat_kcache(OUT dbid oid, OUT reads bigint, OUT operation text)
+CREATE FUNCTION pg_stat_kcache(OUT dbid oid, OUT reads_raw bigint, OUT operation text)
     RETURNS SETOF record
     LANGUAGE c COST 1000
     AS '$libdir/pg_stat_kcache', 'pg_stat_kcache';
@@ -24,8 +24,8 @@ CREATE FUNCTION pg_stat_kcache_reset()
  */
 CREATE VIEW pg_stat_kcache AS
 SELECT dbid, datname,
-       reads AS reads_raw,
-       reads*512/(current_setting('block_size')::integer) AS reads_blks,
+       reads_raw AS reads_raw,
+       reads_raw*512/(current_setting('block_size')::integer) AS reads_blks,
        operation
   FROM pg_stat_kcache()
   JOIN pg_database
