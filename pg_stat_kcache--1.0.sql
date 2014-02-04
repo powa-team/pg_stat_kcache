@@ -9,7 +9,7 @@
 SET client_encoding = 'UTF8';
 SET check_function_bodies = true;
 
-CREATE FUNCTION pg_stat_kcache(OUT dbid oid, OUT reads bigint)
+CREATE FUNCTION pg_stat_kcache(OUT dbid oid, OUT reads bigint, OUT operation text)
     RETURNS SETOF record
     LANGUAGE c COST 1000
     AS '$libdir/pg_stat_kcache', 'pg_stat_kcache';
@@ -24,7 +24,8 @@ CREATE FUNCTION pg_stat_kcache_reset()
  */
 CREATE VIEW pg_stat_kcache AS
 SELECT dbid, datname,
-       reads*512/8192 AS reads
+       reads*512/8192 AS reads,
+       operation
   FROM pg_stat_kcache()
   JOIN pg_database
     ON oid=dbid;
