@@ -24,7 +24,7 @@ CREATE FUNCTION pg_stat_kcache_reset()
  */
 CREATE VIEW pg_stat_kcache AS
 SELECT dbid, datname,
-       reads*512/8192 AS reads,
+       reads*512/(current_setting('block_size')::integer) AS reads,
        operation
   FROM pg_stat_kcache()
   JOIN pg_database
