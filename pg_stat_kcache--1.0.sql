@@ -22,7 +22,7 @@ CREATE FUNCTION pg_stat_kcache_reset()
 /* ru_inblock block size is 512 bytes with Linux
  * see http://lkml.indiana.edu/hypermail/linux/kernel/0703.2/0937.html
  */
-CREATE VIEW pg_stat_kcache AS
+CREATE VIEW pg_stat_kcache_detail AS
 SELECT dbid, datname,
        reads_raw AS reads_raw,
        reads_raw*512/(current_setting('block_size')::integer) AS reads_blks,
@@ -31,6 +31,14 @@ SELECT dbid, datname,
   JOIN pg_database
     ON oid=dbid;
 
+CREATE VIEW pg_stat_kcache AS
+SELECT dbid, datname,
+       SUM(reads_raw) AS reads_raw,
+	   SUM(reads_blks) AS reads_blks
+  FROM pg_stat_kcache_detail
+ GROUP BY dbid, datname;
+
+GRANT SELECT ON pg_stat_kcache_detail TO public;
 GRANT SELECT ON pg_stat_kcache TO public;
 GRANT ALL ON FUNCTION pg_stat_kcache() TO public;
 REVOKE ALL ON FUNCTION pg_stat_kcache_reset() FROM public;
