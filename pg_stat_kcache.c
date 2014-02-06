@@ -25,18 +25,19 @@
 #include "storage/ipc.h"
 #include "storage/spin.h"
 #include "utils/builtins.h"
+#include "utils/guc.h"
 
 
 PG_MODULE_MAGIC;
 
 #define PGSK_DUMP_FILE  "global/pg_stat_kcache.stat"
-#define MAX_DB_ENTRIES 200
 #define PG_STAT_KCACHE_COLS 3
 
 static const uint32 PGSK_FILE_HEADER = 0x0d756e0e;
 
 struct	rusage own_rusage;
 int64	current_reads = 0;
+static int	pgsk_max_db;	/* max # db to store */
 
 /*
  * Statistics per database
@@ -94,7 +95,24 @@ _PG_init(void)
 		return;
 	}
 
-	RequestAddinShmemSpace(pgsk_memsize());
+	/*
+	 * Define (or redefine) custom GUC variables.
+	 */
+	DefineCustomIntVariable( "pg_stat_kcache.max_db",
+	  "Define how many databases will be stored.",
+							NULL,
+							&pgsk_max_db,
+							200,
+							1,
+							INT_MAX,
+							PGC_POSTMASTER,
+							0,
+							NULL,
+							NULL,
+							NULL);
+
+
+   RequestAddinShmemSpace(pgsk_memsize());
 	RequestAddinLWLocks(1);
 
 	/* Install hook */
@@ -145,7 +163,7 @@ pgsk_shmem_startup(void)
 
 	/* allocate stats shared memory structure */
 	pgskEntries = ShmemInitStruct("pg_stat_kcache stats",
-					sizeof(pgskEntry) * MAX_DB_ENTRIES,
+					sizeof(pgskEntry) * pgsk_max_db,
 					&found);
 
 	if (!found)
@@ -245,7 +263,7 @@ pgsk_shmem_shutdown(int code, Datum arg)
 
 	entry = pgskEntries;
 	num_entries = 0;
-	while (num_entries < MAX_DB_ENTRIES)
+	while (num_entries < pgsk_max_db)
 	{
 		if (entry->dbid == InvalidOid)
 			break;
@@ -296,7 +314,7 @@ static Size pgsk_memsize(void)
 {
 	Size	size;
 
-	size = MAXALIGN(sizeof(pgskSharedState)) + MAXALIGN(sizeof(pgskEntry)) * MAX_DB_ENTRIES;
+	size = MAXALIGN(sizeof(pgskSharedState)) + MAXALIGN(sizeof(pgskEntry)) * pgsk_max_db;
 	
 	return size;
 }
@@ -317,7 +335,7 @@ entry_store(Oid dbid, int64 reads, CmdType operation)
 
 	LWLockAcquire(pgsk->lock, LW_SHARED);
 
-	while (i < MAX_DB_ENTRIES && !found)
+	while (i < pgsk_max_db && !found)
 	{
 		if (entry->dbid == dbid || entry->dbid == InvalidOid) {
 			SpinLockAcquire(&entry->mutex);
@@ -350,7 +368,7 @@ static void entry_reset(void)
 
 	/* Mark all entries with InvalidOid */
 	entry = pgskEntries;
-	for (i = 0; i < MAX_DB_ENTRIES ; i++)
+	for (i = 0; i < pgsk_max_db ; i++)
 	{
 		entry->dbid = InvalidOid;
 		for(t = 0; t < CMD_NOTHING; t++)
@@ -457,7 +475,7 @@ pg_stat_kcache(PG_FUNCTION_ARGS)
 	LWLockAcquire(pgsk->lock, LW_SHARED);
 
 	entry = pgskEntries;
-	while (i < MAX_DB_ENTRIES)
+	while (i < pgsk_max_db)
 	{
 		int t;
 		for (t = 0; t < CMD_NOTHING; t++)

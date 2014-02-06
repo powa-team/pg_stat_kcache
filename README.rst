@@ -32,6 +32,10 @@ server restart to take the change into account.
 
   # postgresql.conf
   shared_preload_libraries = 'pg_stat_kcache'
+  pg_stat_kcache.max_db = 200
+
+You can change the parameter "pg_stat_kcache_directory" (default 200) to define
+how many databases pg_stat_kcache will keep track of.
 
 Note that this extension should work with other, like pg_stat_plans or pg_stat_statements.
 
