@@ -101,10 +101,3 @@ Bugs and limitations
 
 No known bugs.
 
-The number of database followed by the extension is limited by an internal
-constant set to 200. If you have more than 200 databases, please change define
-MAX_DB_ENTRIES in pg_stat_kcache.c. An upcoming version of this module may add
-a GUC value to control this more easily.
-
-
-
