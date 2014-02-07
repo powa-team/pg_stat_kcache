@@ -15,9 +15,9 @@ Compiling
 ---------
 
 The module can be built using the standard PGXS infrastructure. For this to work, the
-``pg_config`` program must be available in your $PATH.
+``pg_config`` program must be available in your $PATH. Instruction to install follows::
 
- tar xvfz pg_stat_kcache.tar.gz
+ git clone https://github.com/dalibo/pg_stat_kcache.git
  cd pg_stat_kcache.tar.gz
  make
  make install
@@ -27,8 +27,10 @@ PostgreSQL setup
 
 The extension is now available. But, as it requires some shared memory to hold
 its counters, the module must be loaded at PostgreSQL startup. Thus, you must
-add the module to shared_preload_libraries in your postgresql.conf. You need a
+add the module to ``shared_preload_libraries`` in your ``postgresql.conf``. You need a
 server restart to take the change into account.
+
+Add the following parameters into you ``postgresql.conf``::
 
  # postgresql.conf
  shared_preload_libraries = 'pg_stat_kcache'
@@ -40,7 +42,7 @@ how many databases pg_stat_kcache will keep track of.
 Note that this extension should work with other, like pg_stat_plans or pg_stat_statements.
 
 Once your PostgreSQL cluster is restarted, you can install the extension in every
-database where you need to access the statistics :
+database where you need to access the statistics::
 
  mydb=# CREATE EXTENSION pg_stat_kcache;
 
