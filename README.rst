@@ -120,3 +120,20 @@ Bugs and limitations
 
 No known bugs.
 
+Authors
+=======
+
+pg_stat_kcache is an original development from Thomas Reiss, with large portions
+of code inspired from pg_stat_plans. Julien Rouhaud also contributed some parts of
+the extension.
+
+Thanks goes to Peter Geoghegan for providing much inspiration with pg_stat_plans
+so we could write this extension quite straightforward.
+
+License
+=======
+
+pg_stat_kcache is free software distributed under the PostgreSQL license.
+
+Copyright (c) 2014, dalibo.
+

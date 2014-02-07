@@ -7,7 +7,8 @@
  * Large portions of code freely inspired by pg_stat_plans. Thanks to Peter
  * Geoghegan for this great extension.
  *
- * 2014, Thomas Reiss, PostgreSQL licence
+ * This program is open source, licensed under the PostgreSQL license.
+ * For license terms, see the LICENSE file.
  *
  */
 #include <sys/time.h>
