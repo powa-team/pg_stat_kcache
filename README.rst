@@ -5,7 +5,7 @@ Features
 --------
 
 Gathers statistics about real reads done by the filesystem layer. It is provided
-in the form of an extension for PostgreSQL > 9.1. It should work with lower versions
+in the form of an extension for PostgreSQL >= 9.1. It should work with lower versions
 of PostgreSQL but the support code has to be reworked to do so.
 
 Installation
