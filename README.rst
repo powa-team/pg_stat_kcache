@@ -120,6 +120,9 @@ Bugs and limitations
 
 No known bugs.
 
+We assume that a kernel block is 512 bytes. This is true for Linux, but may not
+be the case for another Unix implementation.
+
 Authors
 =======
 
