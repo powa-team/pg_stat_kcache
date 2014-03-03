@@ -31,7 +31,12 @@
 
 PG_MODULE_MAGIC;
 
+#if PG_VERSION_NUM >= 90300
+#define PGSK_DUMP_FILE  "pg_stat/pg_stat_kcache.stat"
+#else
 #define PGSK_DUMP_FILE  "global/pg_stat_kcache.stat"
+#endif
+
 #define PG_STAT_KCACHE_COLS 3
 
 static const uint32 PGSK_FILE_HEADER = 0x0d756e0e;
