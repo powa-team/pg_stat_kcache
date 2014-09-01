@@ -37,12 +37,22 @@ PG_MODULE_MAGIC;
 #define PGSK_DUMP_FILE  "global/pg_stat_kcache.stat"
 #endif
 
-#define PG_STAT_KCACHE_COLS 3
+#define PG_STAT_KCACHE_COLS 4
 
 static const uint32 PGSK_FILE_HEADER = 0x0d756e0e;
 
 struct	rusage own_rusage;
-int64	current_reads = 0;
+
+/*
+ * Current read and write values, as returned by getrusage
+*/
+typedef struct pgskCounters
+{
+	int64	current_reads;
+	int64	current_writes;
+} pgskCounters;
+pgskCounters	counters = {0, 0};
+
 static int	pgsk_max_db;	/* max # db to store */
 
 /*
@@ -52,6 +62,7 @@ typedef struct pgskEntry
 {
 	Oid			dbid;	/* database Oid */
 	int64		reads[CMD_NOTHING];		/* number of physical reads per database and per statement kind */
+	int64		writes[CMD_NOTHING];	/* number of physical writes per database and per statement kind */
 	slock_t		mutex;		/* protects the counters only */
 } pgskEntry;
 
@@ -92,7 +103,7 @@ static void pgsk_shmem_shutdown(int code, Datum arg);
 static void pgsk_ExecutorStart(QueryDesc *queryDesc, int eflags);
 static void pgsk_ExecutorEnd(QueryDesc *queryDesc);
 static void entry_reset(void);
-static void entry_store(Oid dbid, int64 reads, CmdType operation);
+static void entry_store(Oid dbid, int64 reads, int64 writes, CmdType operation);
 
 void
 _PG_init(void)
@@ -217,6 +228,7 @@ pgsk_shmem_startup(void)
 		for (t = 0; t < CMD_NOTHING; t++)
 		{
 			entry->reads[t] = buffer->reads[t];
+			entry->writes[t] = buffer->writes[t];
 		}
 		/* don't initialize spinlock, already done */
 		entry++;
@@ -336,7 +348,7 @@ static Size pgsk_memsize(void)
  */
 
 static void
-entry_store(Oid dbid, int64 reads, CmdType operation)
+entry_store(Oid dbid, int64 reads, int64 writes, CmdType operation)
 {
 	int i = 0;
 	pgskEntry *entry;
@@ -352,6 +364,7 @@ entry_store(Oid dbid, int64 reads, CmdType operation)
 			SpinLockAcquire(&entry->mutex);
 			entry->dbid = dbid;
 			entry->reads[operation] += reads;
+			entry->writes[operation] += writes;
 			SpinLockRelease(&entry->mutex);
 			found = true;
 			break;
@@ -383,7 +396,10 @@ static void entry_reset(void)
 	{
 		entry->dbid = InvalidOid;
 		for(t = 0; t < CMD_NOTHING; t++)
+		{
 			entry->reads[t] = 0;
+			entry->writes[t] = 0;
+		}
 		SpinLockInit(&entry->mutex);
 		entry++;
 	}
@@ -403,7 +419,8 @@ pgsk_ExecutorStart (QueryDesc *queryDesc, int eflags)
 	getrusage(RUSAGE_SELF, &own_rusage);
 
 	/* store current number of block reads */
-	current_reads = own_rusage.ru_inblock;
+	counters.current_reads = own_rusage.ru_inblock;
+	counters.current_writes = own_rusage.ru_oublock;
 
 	/* give control back to PostgreSQL */
 	if (prev_ExecutorStart)
@@ -422,9 +439,13 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 	/* capture kernel usage stats in own_rusage */
 	getrusage(RUSAGE_SELF, &own_rusage);
 
-	/* store current number of block reads */
-	entry_store(dbid, own_rusage.ru_inblock - current_reads, queryDesc->operation);
-	current_reads = own_rusage.ru_inblock;
+	/* store current number of block reads and writes */
+	entry_store(dbid, own_rusage.ru_inblock - counters.current_reads,
+			own_rusage.ru_oublock - counters.current_writes,
+			queryDesc->operation
+	);
+	counters.current_reads = own_rusage.ru_inblock;
+	counters.current_writes = own_rusage.ru_oublock;
 
 	/* give control back to PostgreSQL */
 	if (prev_ExecutorEnd)
@@ -450,7 +471,7 @@ pg_stat_kcache_reset(PG_FUNCTION_ARGS)
 }
 
 /*
- * Show the amount of reads per sessions
+ * Show the amount of reads and writes per sessions
  * 
 Datum
 pg_stat_kcache_session(PG_FUNCTION_ARGS)
@@ -519,6 +540,7 @@ pg_stat_kcache(PG_FUNCTION_ARGS)
 			SpinLockAcquire(&entry->mutex);
 			values[j++] = ObjectIdGetDatum(entry->dbid);
 			values[j++] = Int64GetDatumFast(entry->reads[t]);
+			values[j++] = Int64GetDatumFast(entry->writes[t]);
 			switch (t)
 			{
 				case CMD_UNKNOWN:
