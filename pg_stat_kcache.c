@@ -67,6 +67,7 @@ typedef struct pgskSharedState
 
 /* saved hook address in case of unload */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
+static ExecutorStart_hook_type prev_ExecutorStart = NULL;
 static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
 
 /* Links to shared memory state */
@@ -88,6 +89,7 @@ static Size pgsk_memsize(void);
 
 static void pgsk_shmem_startup(void);
 static void pgsk_shmem_shutdown(int code, Datum arg);
+static void pgsk_ExecutorStart(QueryDesc *queryDesc, int eflags);
 static void pgsk_ExecutorEnd(QueryDesc *queryDesc);
 static void entry_reset(void);
 static void entry_store(Oid dbid, int64 reads, CmdType operation);
@@ -124,6 +126,8 @@ _PG_init(void)
 	/* Install hook */
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = pgsk_shmem_startup;
+	prev_ExecutorStart = ExecutorStart_hook;
+	ExecutorStart_hook = pgsk_ExecutorStart;
 	prev_ExecutorEnd = ExecutorEnd_hook;
 	ExecutorEnd_hook = pgsk_ExecutorEnd;
 }
@@ -132,6 +136,7 @@ void
 _PG_fini(void)
 {
 	/* uninstall hook */
+	ExecutorStart_hook = prev_ExecutorStart;
 	ExecutorEnd_hook = prev_ExecutorEnd;
 	shmem_startup_hook = prev_shmem_startup_hook;
 }
@@ -388,8 +393,24 @@ static void entry_reset(void)
 }
 
 /*
- * Hook
+ * Hooks
  */
+
+static void
+pgsk_ExecutorStart (QueryDesc *queryDesc, int eflags)
+{
+	/* capture kernel usage stats in own_rusage */
+	getrusage(RUSAGE_SELF, &own_rusage);
+
+	/* store current number of block reads */
+	current_reads = own_rusage.ru_inblock;
+
+	/* give control back to PostgreSQL */
+	if (prev_ExecutorStart)
+		prev_ExecutorStart(queryDesc, eflags);
+	else
+		standard_ExecutorStart(queryDesc, eflags);
+}
 
 static void
 pgsk_ExecutorEnd (QueryDesc *queryDesc)
