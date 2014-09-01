@@ -32,9 +32,9 @@
 PG_MODULE_MAGIC;
 
 #if PG_VERSION_NUM >= 90300
-#define PGSK_DUMP_FILE  "pg_stat/pg_stat_kcache.stat"
+#define PGSK_DUMP_FILE		"pg_stat/pg_stat_kcache.stat"
 #else
-#define PGSK_DUMP_FILE  "global/pg_stat_kcache.stat"
+#define PGSK_DUMP_FILE		"global/pg_stat_kcache.stat"
 #endif
 
 #define PG_STAT_KCACHE_COLS 4
@@ -87,8 +87,8 @@ static pgskEntry *pgskEntries = NULL;
 
 /*--- Functions --- */
 
-void            _PG_init(void);
-void            _PG_fini(void);
+void	_PG_init(void);
+void	_PG_fini(void);
 
 Datum	pg_stat_kcache_reset(PG_FUNCTION_ARGS);
 Datum	pg_stat_kcache(PG_FUNCTION_ARGS);
@@ -118,7 +118,7 @@ _PG_init(void)
 	 * Define (or redefine) custom GUC variables.
 	 */
 	DefineCustomIntVariable( "pg_stat_kcache.max_db",
-	  "Define how many databases will be stored.",
+		"Define how many databases will be stored.",
 							NULL,
 							&pgsk_max_db,
 							200,
@@ -131,7 +131,7 @@ _PG_init(void)
 							NULL);
 
 
-   RequestAddinShmemSpace(pgsk_memsize());
+	RequestAddinShmemSpace(pgsk_memsize());
 	RequestAddinLWLocks(1);
 
 	/* Install hook */
@@ -173,7 +173,7 @@ pgsk_shmem_startup(void)
 	LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);
 
 	/* global access lock */
-        pgsk = ShmemInitStruct("pg_stat_kcache",
+	pgsk = ShmemInitStruct("pg_stat_kcache",
 					sizeof(pgskSharedState),
 					&found);
 
@@ -203,7 +203,7 @@ pgsk_shmem_startup(void)
 	if (file == NULL)
 	{
 		if (errno == ENOENT)
-			return;                         /* ignore not-found error */
+			return;			/* ignore not-found error */
 		goto error;
 	}
 
@@ -338,7 +338,7 @@ static Size pgsk_memsize(void)
 	Size	size;
 
 	size = MAXALIGN(sizeof(pgskSharedState)) + MAXALIGN(sizeof(pgskEntry)) * pgsk_max_db;
-	
+
 	return size;
 }
 
@@ -373,7 +373,7 @@ entry_store(Oid dbid, int64 reads, int64 writes, CmdType operation)
 		i++;
 	}
 
-	/* if there's no more room, then raise a warning */	
+	/* if there's no more room, then raise a warning */
 	if (!found)
 	{
 		elog(WARNING, "pg_stat_kcache: no more free entry for dbid %d", dbid);
@@ -386,7 +386,7 @@ entry_store(Oid dbid, int64 reads, int64 writes, CmdType operation)
 static void entry_reset(void)
 {
 	int i,t;
-	pgskEntry  *entry;
+	pgskEntry	*entry;
 
 	LWLockAcquire(pgsk->lock, LW_EXCLUSIVE);
 
@@ -452,7 +452,7 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 		prev_ExecutorEnd(queryDesc);
 	else
 		standard_ExecutorEnd(queryDesc);
- 
+
 }
 
 /*
@@ -472,7 +472,7 @@ pg_stat_kcache_reset(PG_FUNCTION_ARGS)
 
 /*
  * Show the amount of reads and writes per sessions
- * 
+ *
 Datum
 pg_stat_kcache_session(PG_FUNCTION_ARGS)
 {
@@ -495,7 +495,7 @@ pg_stat_kcache(PG_FUNCTION_ARGS)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("pg_stat_kcache must be loaded via shared_preload_libraries")));
-        /* check to see if caller supports us returning a tuplestore */
+	/* check to see if caller supports us returning a tuplestore */
 	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -528,9 +528,9 @@ pg_stat_kcache(PG_FUNCTION_ARGS)
 		int t;
 		for (t = 0; t < CMD_NOTHING; t++)
 		{
-			Datum           values[PG_STAT_KCACHE_COLS];
-			bool            nulls[PG_STAT_KCACHE_COLS];
-			int                     j = 0;
+			Datum		values[PG_STAT_KCACHE_COLS];
+			bool		nulls[PG_STAT_KCACHE_COLS];
+			int			j = 0;
 
 			memset(values, 0, sizeof(values));
 			memset(nulls, 0, sizeof(nulls));
