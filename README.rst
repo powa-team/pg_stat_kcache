@@ -4,9 +4,10 @@ pg_stat_kcache
 Features
 --------
 
-Gathers statistics about real reads done by the filesystem layer. It is provided
-in the form of an extension for PostgreSQL >= 9.1. It should work with lower versions
-of PostgreSQL but the support code has to be reworked to do so.
+Gathers statistics about real reads and writes done by the filesystem layer.
+It is provided in the form of an extension for PostgreSQL >= 9.1. It should
+work with lower versions of PostgreSQL but the support code has to be reworked
+to do so.
 
 Installation
 ============
@@ -54,32 +55,42 @@ pg_stat_kcache create several objects.
 pg_stat_kcache view
 -------------------
 
-+------------+---------+----------------------------------------------------+
-| Name       | Type    | Description                                        |
-+============+=========+====================================================+
-| dbid       | oid     | Database OID                                       |
-+------------+---------+----------------------------------------------------+
-| reads_raw  | bigint  + Number of blocks read by the filesystem layer      |
-+------------+---------+----------------------------------------------------+
-| reads_blks | bigint  + Number of 8K blocks read by the filesystem layer   |
-+------------+---------+----------------------------------------------------+
++-------------+---------+-----------------------------------------------------+
+| Name        | Type    | Description                                         |
++=============+=========+=====================================================+
+| dbid        | oid     | Database OID                                        |
++-------------+---------+-----------------------------------------------------+
+| reads_raw   | bigint  + Number of blocks read by the filesystem layer       |
++-------------+---------+-----------------------------------------------------+
+| reads_blks  | bigint  + Number of 8K blocks read by the filesystem layer    |
++-------------+---------+-----------------------------------------------------+
+| writes_raw  | bigint  + Number of blocks written by the filesystem layer    |
++-------------+---------+-----------------------------------------------------+
+| writes_blks | bigint  + Number of 8K blocks written by the filesystem layer |
++-------------+---------+-----------------------------------------------------+
 
 This function assumes that the filesystem block size is 512 bytes.
 
 pg_stat_kcache_detail view
 --------------------------
 
-+------------+---------+----------------------------------------------------+
-| Name       | Type    | Description                                        |
-+============+=========+====================================================+
-| dbid       | oid     | Database OID                                       |
-+------------+---------+----------------------------------------------------+
-| reads_raw  | bigint  + Number of blocks read by the filesystem layer      |
-+------------+---------+----------------------------------------------------+
-| reads_blks | bigint  + Number of 8K blocks read by the filesystem layer   |
-+------------+---------+----------------------------------------------------+
-| operation  | text    | Kind of statement                                  |
-+------------+---------+----------------------------------------------------+
++-------------+---------+-----------------------------------------------------+
+| Name        | Type    | Description                                         |
++=============+=========+=====================================================+
+| dbid        | oid     | Database OID                                        |
++-------------+---------+-----------------------------------------------------+
+| datname     | oid     | Database name                                       |
++-------------+---------+-----------------------------------------------------+
+| reads_raw   | bigint  + Number of blocks read by the filesystem layer       |
++-------------+---------+-----------------------------------------------------+
+| reads_blks  | bigint  + Number of 8K blocks read by the filesystem layer    |
++-------------+---------+-----------------------------------------------------+
+| writes_raw  | bigint  + Number of blocks written by the filesystem layer    |
++-------------+---------+-----------------------------------------------------+
+| writes_blks | bigint  + Number of 8K blocks written by the filesystem layer |
++-------------+---------+-----------------------------------------------------+
+| operation   | text    | Kind of statement                                   |
++-------------+---------+-----------------------------------------------------+
 
 This function assumes that the filesystem block size is 512 bytes.
 
@@ -102,15 +113,17 @@ The function can be called by any user::
 
 It provides the following columns :
 
-+------------+---------+-----------------------------------------------+
-| Name       | Type    | Description                                   |
-+============+=========+===============================================+
-| dbid       | oid     | Database OID                                  |
-+------------+---------+-----------------------------------------------+
-| reads_raw  | bigint  + Number of blocks read by the filesystem layer |
-+------------+---------+-----------------------------------------------+
-| operation  | text    | Kind of statement                             |
-+------------+---------+-----------------------------------------------+
++------------+---------+--------------------------------------------------+
+| Name       | Type    | Description                                      |
++============+=========+==================================================+
+| dbid       | oid     | Database OID                                     |
++------------+---------+--------------------------------------------------+
+| reads_raw  | bigint  + Number of blocks read by the filesystem layer    |
++------------+---------+--------------------------------------------------+
+| writes_raw | bigint  + Number of blocks written by the filesystem layer |
++------------+---------+--------------------------------------------------+
+| operation  | text    | Kind of statement                                |
++------------+---------+--------------------------------------------------+
 
 Note that the block size is not equal to PostgreSQL block size. A Linux kernel
 accounts them as 512 byte blocks.
