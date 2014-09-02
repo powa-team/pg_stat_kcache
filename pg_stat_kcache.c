@@ -37,7 +37,7 @@ PG_MODULE_MAGIC;
 #define PGSK_DUMP_FILE		"global/pg_stat_kcache.stat"
 #endif
 
-#define PG_STAT_KCACHE_COLS 4
+#define PG_STAT_KCACHE_COLS 6
 
 static const uint32 PGSK_FILE_HEADER = 0x0d756e0e;
 
@@ -48,10 +48,12 @@ struct	rusage own_rusage;
 */
 typedef struct pgskCounters
 {
-	int64	current_reads;
-	int64	current_writes;
+	int64				current_reads;
+	int64				current_writes;
+	struct	timeval		current_utime;
+	struct	timeval		current_stime;
 } pgskCounters;
-pgskCounters	counters = {0, 0};
+pgskCounters	counters = {0, 0, {0, 0}, {0, 0}};
 
 static int	pgsk_max_db;	/* max # db to store */
 
@@ -63,7 +65,9 @@ typedef struct pgskEntry
 	Oid			dbid;	/* database Oid */
 	int64		reads[CMD_NOTHING];		/* number of physical reads per database and per statement kind */
 	int64		writes[CMD_NOTHING];	/* number of physical writes per database and per statement kind */
-	slock_t		mutex;		/* protects the counters only */
+	float8		utime[CMD_NOTHING];		/* CPU user time per database and per statement kind */
+	float8		stime[CMD_NOTHING];		/* CPU system time per database and per statement kind */
+	slock_t		mutex;	/* protects the counters only */
 } pgskEntry;
 
 /*
@@ -103,7 +107,10 @@ static void pgsk_shmem_shutdown(int code, Datum arg);
 static void pgsk_ExecutorStart(QueryDesc *queryDesc, int eflags);
 static void pgsk_ExecutorEnd(QueryDesc *queryDesc);
 static void entry_reset(void);
-static void entry_store(Oid dbid, int64 reads, int64 writes, CmdType operation);
+static void entry_store(Oid dbid, int64 reads, int64 writes,
+						double utime,
+						double stime,
+						CmdType operation);
 
 void
 _PG_init(void)
@@ -229,6 +236,8 @@ pgsk_shmem_startup(void)
 		{
 			entry->reads[t] = buffer->reads[t];
 			entry->writes[t] = buffer->writes[t];
+			entry->utime[t] = buffer->utime[t];
+			entry->stime[t] = buffer->stime[t];
 		}
 		/* don't initialize spinlock, already done */
 		entry++;
@@ -348,7 +357,10 @@ static Size pgsk_memsize(void)
  */
 
 static void
-entry_store(Oid dbid, int64 reads, int64 writes, CmdType operation)
+entry_store(Oid dbid, int64 reads, int64 writes,
+						double utime,
+						double stime,
+						CmdType operation)
 {
 	int i = 0;
 	pgskEntry *entry;
@@ -365,6 +377,8 @@ entry_store(Oid dbid, int64 reads, int64 writes, CmdType operation)
 			entry->dbid = dbid;
 			entry->reads[operation] += reads;
 			entry->writes[operation] += writes;
+			entry->utime[operation] += utime;
+			entry->stime[operation] += stime;
 			SpinLockRelease(&entry->mutex);
 			found = true;
 			break;
@@ -399,6 +413,8 @@ static void entry_reset(void)
 		{
 			entry->reads[t] = 0;
 			entry->writes[t] = 0;
+			entry->utime[t] = 0.0;
+			entry->stime[t] = 0.0;
 		}
 		SpinLockInit(&entry->mutex);
 		entry++;
@@ -421,6 +437,10 @@ pgsk_ExecutorStart (QueryDesc *queryDesc, int eflags)
 	/* store current number of block reads */
 	counters.current_reads = own_rusage.ru_inblock;
 	counters.current_writes = own_rusage.ru_oublock;
+	counters.current_utime.tv_sec = own_rusage.ru_utime.tv_sec;
+	counters.current_utime.tv_usec = own_rusage.ru_utime.tv_usec;
+	counters.current_stime.tv_sec = own_rusage.ru_stime.tv_sec;
+	counters.current_stime.tv_usec = own_rusage.ru_stime.tv_usec;
 
 	/* give control back to PostgreSQL */
 	if (prev_ExecutorStart)
@@ -435,17 +455,31 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 	Oid dbid;
 
 	dbid = MyDatabaseId;
+	double utime;
+	double stime;
 
 	/* capture kernel usage stats in own_rusage */
 	getrusage(RUSAGE_SELF, &own_rusage);
 
+	/* Compute CPU time delta */
+	utime = ( (double) own_rusage.ru_utime.tv_sec + (double) own_rusage.ru_utime.tv_usec / 1000000.0 )
+		- ( (double) counters.current_utime.tv_sec + (double) counters.current_utime.tv_usec / 1000000.0 );
+	stime = ( (double) own_rusage.ru_stime.tv_sec + (double) own_rusage.ru_stime.tv_usec / 1000000.0 )
+		- ( (double) counters.current_stime.tv_sec + (double) counters.current_stime.tv_usec / 1000000.0 );
+
 	/* store current number of block reads and writes */
 	entry_store(dbid, own_rusage.ru_inblock - counters.current_reads,
 			own_rusage.ru_oublock - counters.current_writes,
+			utime,
+			stime,
 			queryDesc->operation
 	);
 	counters.current_reads = own_rusage.ru_inblock;
 	counters.current_writes = own_rusage.ru_oublock;
+	counters.current_utime.tv_sec = own_rusage.ru_utime.tv_sec;
+	counters.current_utime.tv_usec = own_rusage.ru_utime.tv_usec;
+	counters.current_stime.tv_sec = own_rusage.ru_stime.tv_sec;
+	counters.current_stime.tv_usec = own_rusage.ru_stime.tv_usec;
 
 	/* give control back to PostgreSQL */
 	if (prev_ExecutorEnd)
@@ -541,6 +575,8 @@ pg_stat_kcache(PG_FUNCTION_ARGS)
 			values[j++] = ObjectIdGetDatum(entry->dbid);
 			values[j++] = Int64GetDatumFast(entry->reads[t]);
 			values[j++] = Int64GetDatumFast(entry->writes[t]);
+			values[j++] = Float8GetDatumFast(entry->utime[t]);
+			values[j++] = Float8GetDatumFast(entry->stime[t]);
 			switch (t)
 			{
 				case CMD_UNKNOWN:
