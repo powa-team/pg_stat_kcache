@@ -10,7 +10,8 @@ SET client_encoding = 'UTF8';
 SET check_function_bodies = true;
 
 CREATE FUNCTION pg_stat_kcache(OUT dbid oid, OUT reads_raw bigint,
-    OUT writes_raw bigint, OUT operation text)
+    OUT writes_raw bigint, OUT user_time double precision, OUT system_time double precision,
+    OUT operation text)
     RETURNS SETOF record
     LANGUAGE c COST 1000
     AS '$libdir/pg_stat_kcache', 'pg_stat_kcache';
@@ -29,6 +30,8 @@ SELECT dbid, datname,
        reads_raw*512/(current_setting('block_size')::integer) AS reads_blks,
        writes_raw AS writes_raw,
        writes_raw*512/(current_setting('block_size')::integer) AS writes_blks,
+       user_time,
+       system_time,
        operation
   FROM pg_stat_kcache()
   JOIN pg_database
@@ -39,7 +42,9 @@ SELECT dbid, datname,
        SUM(reads_raw) AS reads_raw,
        SUM(reads_blks) AS reads_blks,
        SUM(writes_raw) AS writes_raw,
-       SUM(writes_blks) AS writes_blks
+       SUM(writes_blks) AS writes_blks,
+       SUM(user_time) AS user_time,
+       SUM(system_time) AS system_time
   FROM pg_stat_kcache_detail
  GROUP BY dbid, datname;
 
