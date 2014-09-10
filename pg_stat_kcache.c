@@ -76,7 +76,6 @@ typedef struct pgskEntry
 typedef struct pgskSharedState
 {
 	LWLockId	lock;			/* protects hashtable search/modification */
-	int			query_size;		/* max query length in bytes */
 } pgskSharedState;
 
 
@@ -474,12 +473,6 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 			stime,
 			queryDesc->operation
 	);
-	counters.current_reads = own_rusage.ru_inblock;
-	counters.current_writes = own_rusage.ru_oublock;
-	counters.current_utime.tv_sec = own_rusage.ru_utime.tv_sec;
-	counters.current_utime.tv_usec = own_rusage.ru_utime.tv_usec;
-	counters.current_stime.tv_sec = own_rusage.ru_stime.tv_sec;
-	counters.current_stime.tv_usec = own_rusage.ru_stime.tv_usec;
 
 	/* give control back to PostgreSQL */
 	if (prev_ExecutorEnd)
