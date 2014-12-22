@@ -1,6 +1,7 @@
 # pg_stat_kernel extension
 comment = 'Kernel cache statistics gathering'
-default_version = '1.0'
-module_pathname = '$libdir/pg_stat_cachecache'
+default_version = '2.0'
+requires = 'pg_stat_statements'
+module_pathname = '$libdir/pg_stat_kcache'
 relocatable = true
 

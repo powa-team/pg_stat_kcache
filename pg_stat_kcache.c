@@ -18,6 +18,7 @@
 
 #include <unistd.h>
 
+#include "access/hash.h"
 #include "executor/executor.h"
 #include "funcapi.h"
 #include "miscadmin.h"
@@ -37,9 +38,18 @@ PG_MODULE_MAGIC;
 #define PGSK_DUMP_FILE		"global/pg_stat_kcache.stat"
 #endif
 
-#define PG_STAT_KCACHE_COLS 6
+#define PG_STAT_KCACHE_COLS 7
+#define USAGE_DECREASE_FACTOR	(0.99)	/* decreased every entry_dealloc */
+#define STICKY_DECREASE_FACTOR	(0.50)	/* factor for sticky entries */
+#define USAGE_DEALLOC_PERCENT	5		/* free this % of entries at once */
+#define USAGE_INIT				(1.0)	/* including initial planning */
 
-static const uint32 PGSK_FILE_HEADER = 0x0d756e0e;
+/* ru_inblock block size is 512 bytes with Linux
+ * see http://lkml.indiana.edu/hypermail/linux/kernel/0703.2/0937.html
+ */
+#define RUSAGE_BLOCK_SIZE	512			/* Size of a block for getrusage() */
+
+static const uint32 PGSK_FILE_HEADER = 0x0d756e0f;
 
 struct	rusage own_rusage;
 
@@ -48,26 +58,39 @@ struct	rusage own_rusage;
 */
 typedef struct pgskCounters
 {
-	int64				current_reads;
-	int64				current_writes;
-	struct	timeval		current_utime;
-	struct	timeval		current_stime;
+	int64				current_reads;	/* Physical block reads */
+	int64				current_writes;	/* Physical block writes */
+	struct	timeval		current_utime;	/* CPU user time */
+	struct	timeval		current_stime;	/* CPU system time */
 } pgskCounters;
 pgskCounters	counters = {0, 0, {0, 0}, {0, 0}};
 
-static int	pgsk_max_db;	/* max # db to store */
+static int	pgsk_max;	/* max #queries to store. pg_stat_statements.max is used */
+
+/*
+ * Hashtable key that defines the identity of a hashtable entry.  We use the
+ * same hash as pg_stat_statements
+ */
+typedef struct pgskHashKey
+{
+	Oid			userid;			/* user OID */
+	Oid			dbid;			/* database OID */
+	uint32		queryid;		/* query identifier */
+} pgskHashKey;
 
 /*
  * Statistics per database
  */
 typedef struct pgskEntry
 {
-	Oid			dbid;	/* database Oid */
-	int64		reads[CMD_NOTHING];		/* number of physical reads per database and per statement kind */
-	int64		writes[CMD_NOTHING];	/* number of physical writes per database and per statement kind */
-	float8		utime[CMD_NOTHING];		/* CPU user time per database and per statement kind */
-	float8		stime[CMD_NOTHING];		/* CPU system time per database and per statement kind */
-	slock_t		mutex;	/* protects the counters only */
+	pgskHashKey	key;		/* hash key of entry - MUST BE FIRST */
+	int64		calls;		/* # of times executed */
+	int64		reads;		/* number of physical reads per database and per statement kind */
+	int64		writes;		/* number of physical writes per database and per statement kind */
+	float8		utime;		/* CPU user time per database and per statement kind */
+	float8		stime;		/* CPU system time per database and per statement kind */
+	double		usage;		/* usage factor */
+	slock_t		mutex;		/* protects the counters only */
 } pgskEntry;
 
 /*
@@ -75,7 +98,8 @@ typedef struct pgskEntry
  */
 typedef struct pgskSharedState
 {
-	LWLockId	lock;			/* protects hashtable search/modification */
+	LWLockId	lock;					/* protects hashtable search/modification */
+	double		cur_median_usage;		/* current median usage in hashtable */
 } pgskSharedState;
 
 
@@ -86,7 +110,7 @@ static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
 
 /* Links to shared memory state */
 static pgskSharedState *pgsk = NULL;
-static pgskEntry *pgskEntries = NULL;
+static HTAB *pgsk_hash = NULL;
 
 /*--- Functions --- */
 
@@ -99,17 +123,21 @@ Datum	pg_stat_kcache(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(pg_stat_kcache_reset);
 PG_FUNCTION_INFO_V1(pg_stat_kcache);
 
+static void pgsk_setmax(void);
 static Size pgsk_memsize(void);
 
 static void pgsk_shmem_startup(void);
 static void pgsk_shmem_shutdown(int code, Datum arg);
 static void pgsk_ExecutorStart(QueryDesc *queryDesc, int eflags);
 static void pgsk_ExecutorEnd(QueryDesc *queryDesc);
+static pgskEntry *entry_alloc(pgskHashKey *key, bool sticky);
+static void entry_dealloc(void);
 static void entry_reset(void);
-static void entry_store(Oid dbid, int64 reads, int64 writes,
+static void entry_store(uint32 queryId, int64 reads, int64 writes,
 						double utime,
-						double stime,
-						CmdType operation);
+						double stime);
+static uint32 pgsk_hash_fn(const void *key, Size keysize);
+static int	pgsk_match_fn(const void *key1, const void *key2, Size keysize);
 
 void
 _PG_init(void)
@@ -123,20 +151,6 @@ _PG_init(void)
 	/*
 	 * Define (or redefine) custom GUC variables.
 	 */
-	DefineCustomIntVariable( "pg_stat_kcache.max_db",
-		"Define how many databases will be stored.",
-							NULL,
-							&pgsk_max_db,
-							200,
-							1,
-							INT_MAX,
-							PGC_POSTMASTER,
-							0,
-							NULL,
-							NULL,
-							NULL);
-
-
 	RequestAddinShmemSpace(pgsk_memsize());
 	RequestAddinLWLocks(1);
 
@@ -162,11 +176,11 @@ static void
 pgsk_shmem_startup(void)
 {
 	bool		found;
+	HASHCTL		info;
 	FILE		*file;
-	int			i,t;
+	int			i;
 	uint32		header;
 	int32		num;
-	pgskEntry	*entry;
 	pgskEntry	*buffer = NULL;
 
 	if (prev_shmem_startup_hook)
@@ -189,20 +203,30 @@ pgsk_shmem_startup(void)
 		pgsk->lock = LWLockAssign();
 	}
 
-	/* allocate stats shared memory structure */
-	pgskEntries = ShmemInitStruct("pg_stat_kcache stats",
-					sizeof(pgskEntry) * pgsk_max_db,
-					&found);
+	/* retrieve pg_stat_statements.max */
+	pgsk_setmax();
 
-	if (!found)
-	{
-		entry_reset();
-	}
+	memset(&info, 0, sizeof(info));
+	info.keysize = sizeof(pgskHashKey);
+	info.entrysize = sizeof(pgskEntry);
+	info.hash = pgsk_hash_fn;
+	info.match = pgsk_match_fn;
+	/* allocate stats shared memory hash */
+	pgsk_hash = ShmemInitHash("pg_stat_kcache hash",
+							  pgsk_max, pgsk_max,
+							  &info,
+							  HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
 
 	LWLockRelease(AddinShmemInitLock);
 
 	if (!IsUnderPostmaster)
 		on_shmem_exit(pgsk_shmem_shutdown, (Datum) 0);
+
+	/*
+	 * Done if some other process already completed our initialization.
+	 */
+	if (found)
+		return;
 
 	/* Load stat file, don't care about locking */
 	file = AllocateFile(PGSK_DUMP_FILE, PG_BINARY_R);
@@ -213,8 +237,6 @@ pgsk_shmem_startup(void)
 		goto error;
 	}
 
-	buffer = (pgskEntry *) palloc(sizeof(pgskEntry));
-
 	/* check is header is valid */
 	if (fread(&header, sizeof(uint32), 1, file) != 1 ||
 		header != PGSK_FILE_HEADER)
@@ -224,25 +246,30 @@ pgsk_shmem_startup(void)
 	if (fread(&num, sizeof(int32), 1, file) != 1)
 		goto error;
 
-	entry = pgskEntries;
 	for (i = 0; i < num ; i++)
 	{
-		if (fread(buffer, offsetof(pgskEntry, mutex), 1, file) != 1)
+		pgskEntry	temp;
+		pgskEntry  *entry;
+
+		if (fread(&temp, sizeof(pgskEntry), 1, file) != 1)
 			goto error;
 
-		entry->dbid = buffer->dbid;
-		for (t = 0; t < CMD_NOTHING; t++)
-		{
-			entry->reads[t] = buffer->reads[t];
-			entry->writes[t] = buffer->writes[t];
-			entry->utime[t] = buffer->utime[t];
-			entry->stime[t] = buffer->stime[t];
-		}
+		/* Skip loading "sticky" entries */
+		if (temp.calls == 0)
+			continue;
+
+		entry = entry_alloc(&temp.key, false);
+
+		/* copy in the actual stats */
+		entry->calls = temp.calls;
+		entry->reads = temp.reads;
+		entry->writes = temp.writes;
+		entry->utime = temp.utime;
+		entry->stime = temp.stime;
+		entry->usage = temp.usage;
 		/* don't initialize spinlock, already done */
-		entry++;
 	}
 
-	pfree(buffer);
 	FreeFile(file);
 
 	/*
@@ -274,8 +301,8 @@ static void
 pgsk_shmem_shutdown(int code, Datum arg)
 {
 	FILE	*file;
+	HASH_SEQ_STATUS hash_seq;
 	int32	num_entries;
-	int	i;
 	pgskEntry	*entry;
 
 	/* Don't try to dump during a crash. */
@@ -292,25 +319,20 @@ pgsk_shmem_shutdown(int code, Datum arg)
 	if (fwrite(&PGSK_FILE_HEADER, sizeof(uint32), 1, file) != 1)
 		goto error;
 
-	entry = pgskEntries;
-	num_entries = 0;
-	while (num_entries < pgsk_max_db)
-	{
-		if (entry->dbid == InvalidOid)
-			break;
-		entry++;
-		num_entries++;
-	}
+	num_entries = hash_get_num_entries(pgsk_hash);
 
 	if (fwrite(&num_entries, sizeof(int32), 1, file) != 1)
 		goto error;
 
-	entry = pgskEntries;
-	for (i = 0; i < num_entries; i++)
+	hash_seq_init(&hash_seq, pgsk_hash);
+	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
-		if (fwrite(entry, offsetof(pgskEntry, mutex), 1, file) != 1)
+		if (fwrite(entry, sizeof(pgskEntry), 1, file) != 1)
+		{
+			/* note: we assume hash_seq_term won't change errno */
+			hash_seq_term(&hash_seq);
 			goto error;
-		entry++;
+		}
 	}
 
 	if (FreeFile(file))
@@ -341,11 +363,22 @@ error:
 	unlink(PGSK_DUMP_FILE);
 }
 
+/*
+ * Retrieve pg_stat_statement.max GUC value
+ */
+static void pgsk_setmax(void)
+{
+	const char *pgss_max;
+	const char *name = "pg_stat_statements.max";
+	pgss_max = GetConfigOption(name, false, false);
+	pgsk_max = atoi(pgss_max);
+}
+
 static Size pgsk_memsize(void)
 {
 	Size	size;
 
-	size = MAXALIGN(sizeof(pgskSharedState)) + MAXALIGN(sizeof(pgskEntry)) * pgsk_max_db;
+	size = MAXALIGN(sizeof(pgskSharedState)) + MAXALIGN(sizeof(pgskEntry)) * pgsk_max;
 
 	return size;
 }
@@ -356,71 +389,182 @@ static Size pgsk_memsize(void)
  */
 
 static void
-entry_store(Oid dbid, int64 reads, int64 writes,
+entry_store(uint32 queryId, int64 reads, int64 writes,
 						double utime,
-						double stime,
-						CmdType operation)
+						double stime)
 {
-	int i = 0;
-	pgskEntry *entry;
-	bool found = false;
+	volatile pgskEntry *e;
 
-	entry = pgskEntries;
+	pgskHashKey key;
+	pgskEntry  *entry;
 
+	/* Safety check... */
+	if (!pgsk || !pgsk_hash)
+		return;
+
+	/* Set up key for hashtable search */
+	key.userid = GetUserId();
+	key.dbid = MyDatabaseId;
+	key.queryid = queryId;
+
+	/* Lookup the hash table entry with shared lock. */
 	LWLockAcquire(pgsk->lock, LW_SHARED);
 
-	while (i < pgsk_max_db && !found)
+	entry = (pgskEntry *) hash_search(pgsk_hash, &key, HASH_FIND, NULL);
+
+	/* Create new entry, if not present */
+	if (!entry)
 	{
-		if (entry->dbid == dbid || entry->dbid == InvalidOid) {
-			SpinLockAcquire(&entry->mutex);
-			entry->dbid = dbid;
-			entry->reads[operation] += reads;
-			entry->writes[operation] += writes;
-			entry->utime[operation] += utime;
-			entry->stime[operation] += stime;
-			SpinLockRelease(&entry->mutex);
-			found = true;
-			break;
-		}
-		entry++;
-		i++;
+		/* Need exclusive lock to make a new hashtable entry - promote */
+		LWLockRelease(pgsk->lock);
+		LWLockAcquire(pgsk->lock, LW_EXCLUSIVE);
+
+		/* OK to create a new hashtable entry */
+		entry = entry_alloc(&key, false);
 	}
 
-	/* if there's no more room, then raise a warning */
-	if (!found)
-	{
-		elog(WARNING, "pg_stat_kcache: no more free entry for dbid %d", dbid);
-	}
+	/*
+	 * Grab the spinlock while updating the counters (see comment about
+	 * locking rules at the head of the file)
+	 */
+	e = (volatile pgskEntry *) entry;
+
+	SpinLockAcquire(&e->mutex);
+
+	/* "Unstick" entry if it was previously sticky */
+	if (e->calls == 0)
+		e->usage = USAGE_INIT;
+
+	e->calls += 1;
+	e->reads += reads;
+	e->writes += writes;
+	e->utime += utime;
+	e->stime += stime;
+
+	SpinLockRelease(&e->mutex);
 
 	LWLockRelease(pgsk->lock);
-	return;
+}
+
+/*
+ * Allocate a new hashtable entry.
+ * caller must hold an exclusive lock on pgsk->lock
+ */
+static pgskEntry *entry_alloc(pgskHashKey *key, bool sticky)
+{
+	pgskEntry  *entry;
+	bool		found;
+
+	/* Make space if needed */
+	while (hash_get_num_entries(pgsk_hash) >= pgsk_max)
+		entry_dealloc();
+
+	/* Find or create an entry with desired hash code */
+	entry = (pgskEntry *) hash_search(pgsk_hash, key, HASH_ENTER, &found);
+
+	if (!found)
+	{
+		/* New entry, initialize it */
+
+		/* set the appropriate initial usage count */
+		entry->usage = sticky ? pgsk->cur_median_usage : USAGE_INIT;
+		/* re-initialize the mutex each time ... we assume no one using it */
+		SpinLockInit(&entry->mutex);
+	}
+
+	entry->calls = 0;
+	entry->reads = 0;
+	entry->writes = 0;
+	entry->utime = (0.0);
+	entry->stime = (0.0);
+	entry->usage = (0.0);
+
+	return entry;
+}
+
+/*
+ * qsort comparator for sorting into increasing usage order
+ */
+static int
+entry_cmp(const void *lhs, const void *rhs)
+{
+	double		l_usage = (*(pgskEntry *const *) lhs)->usage;
+	double		r_usage = (*(pgskEntry *const *) rhs)->usage;
+
+	if (l_usage < r_usage)
+		return -1;
+	else if (l_usage > r_usage)
+		return +1;
+	else
+		return 0;
+}
+
+/*
+ * Deallocate least used entries.
+ * Caller must hold an exclusive lock on pgsk->lock.
+ */
+static void
+entry_dealloc(void)
+{
+	HASH_SEQ_STATUS hash_seq;
+	pgskEntry **entries;
+	pgskEntry  *entry;
+	int			nvictims;
+	int			i;
+
+	/*
+	 * Sort entries by usage and deallocate USAGE_DEALLOC_PERCENT of them.
+	 * While we're scanning the table, apply the decay factor to the usage
+	 * values.
+	 */
+
+	entries = palloc(hash_get_num_entries(pgsk_hash) * sizeof(pgskEntry *));
+
+	i = 0;
+	hash_seq_init(&hash_seq, pgsk_hash);
+	while ((entry = hash_seq_search(&hash_seq)) != NULL)
+	{
+		entries[i++] = entry;
+		/* "Sticky" entries get a different usage decay rate. */
+		if (entry->calls == 0)
+			entry->usage *= STICKY_DECREASE_FACTOR;
+		else
+			entry->usage *= USAGE_DECREASE_FACTOR;
+	}
+
+	qsort(entries, i, sizeof(pgskEntry *), entry_cmp);
+
+	if (i > 0)
+	{
+		/* Record the (approximate) median usage */
+		pgsk->cur_median_usage = entries[i / 2]->usage;
+	}
+
+	nvictims = Max(10, i * USAGE_DEALLOC_PERCENT / 100);
+	nvictims = Min(nvictims, i);
+
+	for (i = 0; i < nvictims; i++)
+	{
+		hash_search(pgsk_hash, &entries[i]->key, HASH_REMOVE, NULL);
+	}
+
+	pfree(entries);
 }
 
 static void entry_reset(void)
 {
-	int i,t;
-	pgskEntry	*entry;
+	HASH_SEQ_STATUS hash_seq;
+	pgskEntry  *entry;
 
 	LWLockAcquire(pgsk->lock, LW_EXCLUSIVE);
 
-	/* Mark all entries with InvalidOid */
-	entry = pgskEntries;
-	for (i = 0; i < pgsk_max_db ; i++)
+	hash_seq_init(&hash_seq, pgsk_hash);
+	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
-		entry->dbid = InvalidOid;
-		for(t = 0; t < CMD_NOTHING; t++)
-		{
-			entry->reads[t] = 0;
-			entry->writes[t] = 0;
-			entry->utime[t] = 0.0;
-			entry->stime[t] = 0.0;
-		}
-		SpinLockInit(&entry->mutex);
-		entry++;
+		hash_search(pgsk_hash, &entry->key, HASH_REMOVE, NULL);
 	}
 
 	LWLockRelease(pgsk->lock);
-	return;
 }
 
 /*
@@ -451,14 +595,15 @@ pgsk_ExecutorStart (QueryDesc *queryDesc, int eflags)
 static void
 pgsk_ExecutorEnd (QueryDesc *queryDesc)
 {
-	Oid dbid;
+	uint32 queryId;
 
-	dbid = MyDatabaseId;
 	double utime;
 	double stime;
 
 	/* capture kernel usage stats in own_rusage */
 	getrusage(RUSAGE_SELF, &own_rusage);
+
+	queryId = queryDesc->plannedstmt->queryId;
 
 	/* Compute CPU time delta */
 	utime = ( (double) own_rusage.ru_utime.tv_sec + (double) own_rusage.ru_utime.tv_usec / 1000000.0 )
@@ -467,11 +612,10 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 		- ( (double) counters.current_stime.tv_sec + (double) counters.current_stime.tv_usec / 1000000.0 );
 
 	/* store current number of block reads and writes */
-	entry_store(dbid, own_rusage.ru_inblock - counters.current_reads,
+	entry_store(queryId, own_rusage.ru_inblock - counters.current_reads,
 			own_rusage.ru_oublock - counters.current_writes,
 			utime,
-			stime,
-			queryDesc->operation
+			stime
 	);
 
 	/* give control back to PostgreSQL */
@@ -480,6 +624,36 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 	else
 		standard_ExecutorEnd(queryDesc);
 
+}
+
+/*
+ * Calculate hash value for a key
+ */
+static uint32
+pgsk_hash_fn(const void *key, Size keysize)
+{
+	const pgskHashKey *k = (const pgskHashKey *) key;
+
+	return hash_uint32((uint32) k->userid) ^
+		hash_uint32((uint32) k->dbid) ^
+		hash_uint32((uint32) k->queryid);
+}
+
+/*
+ * Compare two keys - zero means match
+ */
+static int
+pgsk_match_fn(const void *key1, const void *key2, Size keysize)
+{
+	const pgskHashKey *k1 = (const pgskHashKey *) key1;
+	const pgskHashKey *k2 = (const pgskHashKey *) key2;
+
+	if (k1->userid == k2->userid &&
+		k1->dbid == k2->dbid &&
+		k1->queryid == k2->queryid)
+		return 0;
+	else
+		return 1;
 }
 
 /*
@@ -512,10 +686,10 @@ pg_stat_kcache(PG_FUNCTION_ARGS)
 	ReturnSetInfo	*rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
 	MemoryContext	per_query_ctx;
 	MemoryContext	oldcontext;
-	pgskEntry		*entry;
 	TupleDesc		tupdesc;
 	Tuplestorestate	*tupstore;
-	int				i = 0;
+	HASH_SEQ_STATUS hash_seq;
+	pgskEntry		*entry;
 
 
 	if (!pgsk)
@@ -533,6 +707,7 @@ pg_stat_kcache(PG_FUNCTION_ARGS)
 				 errmsg("materialize mode required, but it is not " \
 							"allowed in this context")));
 
+	/* Switch into long-lived context to construct returned data structures */
 	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
 	oldcontext = MemoryContextSwitchTo(per_query_ctx);
 
@@ -549,62 +724,36 @@ pg_stat_kcache(PG_FUNCTION_ARGS)
 
 	LWLockAcquire(pgsk->lock, LW_SHARED);
 
-	entry = pgskEntries;
-	while (i < pgsk_max_db)
+	hash_seq_init(&hash_seq, pgsk_hash);
+	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
-		int t;
-		for (t = 0; t < CMD_NOTHING; t++)
+		Datum		values[PG_STAT_KCACHE_COLS];
+		bool		nulls[PG_STAT_KCACHE_COLS];
+		int			i = 0;
+
+		memset(values, 0, sizeof(values));
+		memset(nulls, 0, sizeof(nulls));
+
+		SpinLockAcquire(&entry->mutex);
+
+		/* Skip entry if unexecuted (ie, it's a pending "sticky" entry) */
+		if ( entry->calls == 0)
 		{
-			Datum		values[PG_STAT_KCACHE_COLS];
-			bool		nulls[PG_STAT_KCACHE_COLS];
-			int			j = 0;
-
-			memset(values, 0, sizeof(values));
-			memset(nulls, 0, sizeof(nulls));
-
-			if (entry->dbid == InvalidOid)
-				break;
-			SpinLockAcquire(&entry->mutex);
-			values[j++] = ObjectIdGetDatum(entry->dbid);
-			values[j++] = Int64GetDatumFast(entry->reads[t]);
-			values[j++] = Int64GetDatumFast(entry->writes[t]);
-			values[j++] = Float8GetDatumFast(entry->utime[t]);
-			values[j++] = Float8GetDatumFast(entry->stime[t]);
-			switch (t)
-			{
-				case CMD_UNKNOWN:
-					values[j++] = CStringGetTextDatum("UNKNOWN");
-				break;
-				case CMD_SELECT:
-					values[j++] = CStringGetTextDatum("SELECT");
-				break;
-				case CMD_UPDATE:
-					values[j++] = CStringGetTextDatum("UPDATE");
-				break;
-				case CMD_INSERT:
-					values[j++] = CStringGetTextDatum("INSERT");
-				break;
-				case CMD_DELETE:
-					values[j++] = CStringGetTextDatum("DELETE");
-				break;
-				case CMD_UTILITY:
-					values[j++] = CStringGetTextDatum("UTILITY");
-				break;
-				case CMD_NOTHING:
-					values[j++] = CStringGetTextDatum("NOTHING");
-				break;
-				default:
-					values[j++] = CStringGetTextDatum("ERROR");
-				break;
-			}
 			SpinLockRelease(&entry->mutex);
-
-			Assert(j == PG_STAT_PLAN_COLS);
-
-			tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+			continue;
 		}
-		entry++;
-		i++;
+		values[i++] = UInt32GetDatum(entry->key.queryid);
+		values[i++] = ObjectIdGetDatum(entry->key.userid);
+		values[i++] = ObjectIdGetDatum(entry->key.dbid);
+		values[i++] = Int64GetDatumFast(entry->reads) * RUSAGE_BLOCK_SIZE;
+		values[i++] = Int64GetDatumFast(entry->writes) * RUSAGE_BLOCK_SIZE;
+		values[i++] = Float8GetDatumFast(entry->utime);
+		values[i++] = Float8GetDatumFast(entry->stime);
+		SpinLockRelease(&entry->mutex);
+
+		Assert(j == PG_STAT_PLAN_COLS);
+
+		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 	}
 
 	LWLockRelease(pgsk->lock);

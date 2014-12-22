@@ -5,9 +5,10 @@ Features
 --------
 
 Gathers statistics about real reads and writes done by the filesystem layer.
-It is provided in the form of an extension for PostgreSQL >= 9.1. It should
-work with lower versions of PostgreSQL but the support code has to be reworked
-to do so.
+It is provided in the form of an extension for PostgreSQL >= 9.4., and requires
+pg_stat_statements extension to be installed. PostgreSQL 9.4 or more is
+required as previous version of provided pg_stat_statements didn't expose the
+queryid field.
 
 Installation
 ============
@@ -19,7 +20,7 @@ The module can be built using the standard PGXS infrastructure. For this to work
 ``pg_config`` program must be available in your $PATH. Instruction to install follows::
 
  git clone https://github.com/dalibo/pg_stat_kcache.git
- cd pg_stat_kcache.tar.gz
+ cd pg_stat_kcache
  make
  make install
 
@@ -35,12 +36,6 @@ Add the following parameters into you ``postgresql.conf``::
 
  # postgresql.conf
  shared_preload_libraries = 'pg_stat_kcache'
- pg_stat_kcache.max_db = 200
-
-You can change the parameter "pg_stat_kcache_directory" (default 200) to define
-how many databases pg_stat_kcache will keep track of.
-
-Note that this extension should work with other, like pg_stat_plans or pg_stat_statements.
 
 Once your PostgreSQL cluster is restarted, you can install the extension in every
 database where you need to access the statistics::
@@ -58,13 +53,13 @@ pg_stat_kcache view
 +-------------+-------------------+-----------------------------------------------------+
 | Name        | Type              | Description                                         |
 +=============+===================+=====================================================+
-| dbid        | oid               | Database OID                                        |
+| datname     | name              | Name of the database                                |
 +-------------+-------------------+-----------------------------------------------------+
-| reads_raw   | bigint            + Number of blocks read by the filesystem layer       |
+| reads       | bigint            + Number of blocks read by the filesystem layer       |
 +-------------+-------------------+-----------------------------------------------------+
 | reads_blks  | bigint            + Number of 8K blocks read by the filesystem layer    |
 +-------------+-------------------+-----------------------------------------------------+
-| writes_raw  | bigint            + Number of blocks written by the filesystem layer    |
+| writes      | bigint            + Number of blocks written by the filesystem layer    |
 +-------------+-------------------+-----------------------------------------------------+
 | writes_blks | bigint            + Number of 8K blocks written by the filesystem layer |
 +-------------+-------------------+-----------------------------------------------------+
@@ -72,8 +67,6 @@ pg_stat_kcache view
 +-------------+-------------------+-----------------------------------------------------+
 | system_time | double precision  + System CPU time used                                |
 +-------------+-------------------+-----------------------------------------------------+
-
-This function assumes that the filesystem block size is 512 bytes.
 
 pg_stat_kcache_detail view
 --------------------------
@@ -81,15 +74,17 @@ pg_stat_kcache_detail view
 +-------------+-------------------+-----------------------------------------------------+
 | Name        | Type              | Description                                         |
 +=============+===================+=====================================================+
-| dbid        | oid               | Database OID                                        |
+| query       | text              | Query text                                          |
 +-------------+-------------------+-----------------------------------------------------+
-| datname     | oid               | Database name                                       |
+| datname     | name              | Database name                                       |
 +-------------+-------------------+-----------------------------------------------------+
-| reads_raw   | bigint            + Number of blocks read by the filesystem layer       |
+| rolname     | name              | Role name                                           |
++-------------+-------------------+-----------------------------------------------------+
+| reads       | bigint            + Number of bytes read by the filesystem layer        |
 +-------------+-------------------+-----------------------------------------------------+
 | reads_blks  | bigint            + Number of 8K blocks read by the filesystem layer    |
 +-------------+-------------------+-----------------------------------------------------+
-| writes_raw  | bigint            + Number of blocks written by the filesystem layer    |
+| writes      | bigint            + Number of bytes written by the filesystem layer     |
 +-------------+-------------------+-----------------------------------------------------+
 | writes_blks | bigint            + Number of 8K blocks written by the filesystem layer |
 +---------------+-----------------+-----------------------------------------------------+
@@ -97,10 +92,6 @@ pg_stat_kcache_detail view
 +---------------+-----------------+-----------------------------------------------------+
 | system_time | double precision  + System CPU time used                                |
 +-------------+-------------------+-----------------------------------------------------+
-| operation   | text              | Kind of statement                                   |
-+-------------+-------------------+-----------------------------------------------------+
-
-This function assumes that the filesystem block size is 512 bytes.
 
 pg_stat_kcache_reset function
 -----------------------------
@@ -119,26 +110,25 @@ The function can be called by any user::
 
  SELECT * FROM pg_stat_kcache();
 
-It provides the following columns :
+It provides the following columns:
 
 +-------------+-------------------+--------------------------------------------------+
 | Name        | Type              | Description                                      |
 +============+====================+==================================================+
+| queryid     | bigint            | pg_stat_statements' query identifier             |
++-------------+-------------------+--------------------------------------------------+
+| userid      | oid               | Database OID                                     |
++-------------+-------------------+--------------------------------------------------+
 | dbid        | oid               | Database OID                                     |
 +-------------+-------------------+--------------------------------------------------+
-| reads_raw   | bigint            + Number of blocks read by the filesystem layer    |
+| reads       | bigint            + Number of bytes read by the filesystem layer     |
 +-------------+-------------------+--------------------------------------------------+
-| writes_raw  | bigint            + Number of blocks written by the filesystem layer |
+| writes      | bigint            + Number of bytes written by the filesystem layer  |
 +---------------+-----------------+--------------------------------------------------+
 | user_time   | double precision  + User CPU time used                               |
 +-------------+-------------------+--------------------------------------------------+
 | system_time | double precision  + System CPU time use                              |
 +-------------+-------------------+--------------------------------------------------+
-| operation   | text              | Kind of statement                                |
-+-------------+-------------------+--------------------------------------------------+
-
-Note that the block size is not equal to PostgreSQL block size. A Linux kernel
-accounts them as 512 byte blocks.
 
 Bugs and limitations
 ====================
@@ -147,6 +137,8 @@ No known bugs.
 
 We assume that a kernel block is 512 bytes. This is true for Linux, but may not
 be the case for another Unix implementation.
+
+See: http://lkml.indiana.edu/hypermail/linux/kernel/0703.2/0937.html
 
 Authors
 =======
