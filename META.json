@@ -1,0 +1,36 @@
+{
+   "name": "pg_stat_kcache",
+   "abstract": "An extension gathering CPU and disk acess statistics",
+   "version": "__VERSION__",
+   "maintainer": "Julien Rouhaud <julien.rouhaud@dalibo.com>",
+   "license": "postgresql",
+   "release-status": "stable",
+   "provides": {
+      "pair": {
+         "abstract": "An extension gathering CPU and disk acess statistics",
+         "file": "pg_stat_kcache--__VERSION__.sql",
+         "docfile": "README.rst",
+         "version": "__VERSION__"
+      }
+   },
+   "resources": {
+      "bugtracker": {
+         "web": "http://github.com/dalibo/pg_stat_kcache/issues/"
+      },
+      "repository": {
+        "url":  "git://github.com/dalibo/pg_stat_kcache.git",
+        "web":  "http://github.com/dalibo/pg_stat_kcache/",
+        "type": "git"
+      }
+   },
+   "generated_by": "Julien Rouhaud",
+   "meta-spec": {
+      "version": "1.0.0",
+      "url": "http://pgxn.org/meta/spec.txt"
+   },
+   "tags": [
+      "monitoring",
+      "CPU",
+      "disk"
+   ]
+}

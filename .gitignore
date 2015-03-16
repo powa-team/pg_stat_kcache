@@ -3,3 +3,4 @@
 *.so
 *.pc
 *~
+pg_stat_kcache-*.zip

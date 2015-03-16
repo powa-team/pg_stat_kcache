@@ -1,0 +1,4 @@
+2.0:
+  - Handle stats per database, user, query
+2.1:
+  - Fix a bug with 32 bits builds (thanks to Alain Delorme for reporting it)
