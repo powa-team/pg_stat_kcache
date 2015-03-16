@@ -742,7 +742,7 @@ pg_stat_kcache(PG_FUNCTION_ARGS)
 			SpinLockRelease(&entry->mutex);
 			continue;
 		}
-		values[i++] = UInt32GetDatum(entry->key.queryid);
+		values[i++] = Int64GetDatumFast(entry->key.queryid);
 		values[i++] = ObjectIdGetDatum(entry->key.userid);
 		values[i++] = ObjectIdGetDatum(entry->key.dbid);
 		values[i++] = Int64GetDatumFast(entry->reads) * RUSAGE_BLOCK_SIZE;
