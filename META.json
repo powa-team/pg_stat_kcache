@@ -4,11 +4,11 @@
    "version": "__VERSION__",
    "maintainer": "Julien Rouhaud <julien.rouhaud@dalibo.com>",
    "license": "postgresql",
-   "release-status": "stable",
+   "release_status": "stable",
    "provides": {
-      "pair": {
+      "pg_stat_kcache": {
          "abstract": "An extension gathering CPU and disk acess statistics",
-         "file": "pg_stat_kcache--__VERSION__.sql",
+         "file": "pg_stat_kcache.sql",
          "docfile": "README.rst",
          "version": "__VERSION__"
       }
