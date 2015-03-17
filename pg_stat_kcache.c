@@ -729,6 +729,7 @@ pg_stat_kcache(PG_FUNCTION_ARGS)
 	{
 		Datum		values[PG_STAT_KCACHE_COLS];
 		bool		nulls[PG_STAT_KCACHE_COLS];
+		int64		reads, writes;
 		int			i = 0;
 
 		memset(values, 0, sizeof(values));
@@ -742,11 +743,13 @@ pg_stat_kcache(PG_FUNCTION_ARGS)
 			SpinLockRelease(&entry->mutex);
 			continue;
 		}
-		values[i++] = Int64GetDatumFast(entry->key.queryid);
+		reads = entry->reads * RUSAGE_BLOCK_SIZE;
+		writes = entry->writes * RUSAGE_BLOCK_SIZE;
+		values[i++] = Int64GetDatum(entry->key.queryid);
 		values[i++] = ObjectIdGetDatum(entry->key.userid);
 		values[i++] = ObjectIdGetDatum(entry->key.dbid);
-		values[i++] = Int64GetDatumFast(entry->reads) * RUSAGE_BLOCK_SIZE;
-		values[i++] = Int64GetDatumFast(entry->writes) * RUSAGE_BLOCK_SIZE;
+		values[i++] = Int64GetDatumFast(reads);
+		values[i++] = Int64GetDatumFast(writes);
 		values[i++] = Float8GetDatumFast(entry->utime);
 		values[i++] = Float8GetDatumFast(entry->stime);
 		SpinLockRelease(&entry->mutex);
