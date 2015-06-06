@@ -754,7 +754,7 @@ pg_stat_kcache(PG_FUNCTION_ARGS)
 		values[i++] = Float8GetDatumFast(entry->stime);
 		SpinLockRelease(&entry->mutex);
 
-		Assert(j == PG_STAT_PLAN_COLS);
+		Assert(i == PG_STAT_KCACHE_COLS);
 
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 	}
