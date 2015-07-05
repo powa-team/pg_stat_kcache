@@ -55,17 +55,17 @@ pg_stat_kcache view
 +=============+===================+=====================================================+
 | datname     | name              | Name of the database                                |
 +-------------+-------------------+-----------------------------------------------------+
-| reads       | bigint            + Number of blocks read by the filesystem layer       |
+| reads       | bigint            | Number of blocks read by the filesystem layer       |
 +-------------+-------------------+-----------------------------------------------------+
-| reads_blks  | bigint            + Number of 8K blocks read by the filesystem layer    |
+| reads_blks  | bigint            | Number of 8K blocks read by the filesystem layer    |
 +-------------+-------------------+-----------------------------------------------------+
-| writes      | bigint            + Number of blocks written by the filesystem layer    |
+| writes      | bigint            | Number of blocks written by the filesystem layer    |
 +-------------+-------------------+-----------------------------------------------------+
-| writes_blks | bigint            + Number of 8K blocks written by the filesystem layer |
+| writes_blks | bigint            | Number of 8K blocks written by the filesystem layer |
 +-------------+-------------------+-----------------------------------------------------+
-| user_time   | double precision  + User CPU time used                                  |
+| user_time   | double precision  | User CPU time used                                  |
 +-------------+-------------------+-----------------------------------------------------+
-| system_time | double precision  + System CPU time used                                |
+| system_time | double precision  | System CPU time used                                |
 +-------------+-------------------+-----------------------------------------------------+
 
 pg_stat_kcache_detail view
@@ -80,17 +80,17 @@ pg_stat_kcache_detail view
 +-------------+-------------------+-----------------------------------------------------+
 | rolname     | name              | Role name                                           |
 +-------------+-------------------+-----------------------------------------------------+
-| reads       | bigint            + Number of bytes read by the filesystem layer        |
+| reads       | bigint            | Number of bytes read by the filesystem layer        |
 +-------------+-------------------+-----------------------------------------------------+
-| reads_blks  | bigint            + Number of 8K blocks read by the filesystem layer    |
+| reads_blks  | bigint            | Number of 8K blocks read by the filesystem layer    |
 +-------------+-------------------+-----------------------------------------------------+
-| writes      | bigint            + Number of bytes written by the filesystem layer     |
+| writes      | bigint            | Number of bytes written by the filesystem layer     |
 +-------------+-------------------+-----------------------------------------------------+
-| writes_blks | bigint            + Number of 8K blocks written by the filesystem layer |
+| writes_blks | bigint            | Number of 8K blocks written by the filesystem layer |
 +---------------+-----------------+-----------------------------------------------------+
-| user_time   | double precision  + User CPU time used                                  |
+| user_time   | double precision  | User CPU time used                                  |
 +---------------+-----------------+-----------------------------------------------------+
-| system_time | double precision  + System CPU time used                                |
+| system_time | double precision  | System CPU time used                                |
 +-------------+-------------------+-----------------------------------------------------+
 
 pg_stat_kcache_reset function
@@ -121,13 +121,13 @@ It provides the following columns:
 +-------------+-------------------+--------------------------------------------------+
 | dbid        | oid               | Database OID                                     |
 +-------------+-------------------+--------------------------------------------------+
-| reads       | bigint            + Number of bytes read by the filesystem layer     |
+| reads       | bigint            | Number of bytes read by the filesystem layer     |
 +-------------+-------------------+--------------------------------------------------+
-| writes      | bigint            + Number of bytes written by the filesystem layer  |
+| writes      | bigint            | Number of bytes written by the filesystem layer  |
 +---------------+-----------------+--------------------------------------------------+
-| user_time   | double precision  + User CPU time used                               |
+| user_time   | double precision  | User CPU time used                               |
 +-------------+-------------------+--------------------------------------------------+
-| system_time | double precision  + System CPU time use                              |
+| system_time | double precision  | System CPU time use                              |
 +-------------+-------------------+--------------------------------------------------+
 
 Bugs and limitations
