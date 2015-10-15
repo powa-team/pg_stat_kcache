@@ -7,7 +7,6 @@
 \echo Use "CREATE EXTENSION pg_stat_kernel" to load this file. \quit
 
 SET client_encoding = 'UTF8';
-SET check_function_bodies = true;
 
 CREATE FUNCTION pg_stat_kcache(OUT queryid bigint, OUT userid oid, OUT dbid oid, OUT reads bigint,
     OUT writes bigint, OUT user_time double precision, OUT system_time double precision)
