@@ -152,7 +152,11 @@ _PG_init(void)
 	 * Define (or redefine) custom GUC variables.
 	 */
 	RequestAddinShmemSpace(pgsk_memsize());
+#if PG_VERSION_NUM >= 90600
+	RequestNamedLWLockTranche("pg_stat_kcache", 1);
+#else
 	RequestAddinLWLocks(1);
+#endif
 
 	/* Install hook */
 	prev_shmem_startup_hook = shmem_startup_hook;
@@ -200,7 +204,11 @@ pgsk_shmem_startup(void)
 	if (!found)
 	{
 		/* First time through ... */
+#if PG_VERSION_NUM >= 90600
+		pgsk->lock = &(GetNamedLWLockTranche("pg_stat_kcache"))->lock;
+#else
 		pgsk->lock = LWLockAssign();
+#endif
 	}
 
 	/* retrieve pg_stat_statements.max */
