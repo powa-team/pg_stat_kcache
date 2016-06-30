@@ -386,7 +386,8 @@ static Size pgsk_memsize(void)
 {
 	Size	size;
 
-	size = MAXALIGN(sizeof(pgskSharedState)) + MAXALIGN(sizeof(pgskEntry)) * pgsk_max;
+	size = MAXALIGN(sizeof(pgskSharedState));
+	size = add_size(size, hash_estimate_size(pgsk_max, sizeof(pgskEntry)));
 
 	return size;
 }
