@@ -65,7 +65,7 @@ typedef struct pgskCounters
 } pgskCounters;
 pgskCounters	counters = {0, 0, {0, 0}, {0, 0}};
 
-static int	pgsk_max;	/* max #queries to store. pg_stat_statements.max is used */
+static int	pgsk_max = 0;	/* max #queries to store. pg_stat_statements.max is used */
 
 /*
  * Hashtable key that defines the identity of a hashtable entry.  We use the
@@ -148,9 +148,9 @@ _PG_init(void)
 		return;
 	}
 
-	/*
-	 * Define (or redefine) custom GUC variables.
-	 */
+	/* set pgsk_max if needed */
+	pgsk_setmax();
+
 	RequestAddinShmemSpace(pgsk_memsize());
 #if PG_VERSION_NUM >= 90600
 	RequestNamedLWLockTranche("pg_stat_kcache", 1);
@@ -211,7 +211,7 @@ pgsk_shmem_startup(void)
 #endif
 	}
 
-	/* retrieve pg_stat_statements.max */
+	/* set pgsk_max if needed */
 	pgsk_setmax();
 
 	memset(&info, 0, sizeof(info));
@@ -372,12 +372,18 @@ error:
 }
 
 /*
- * Retrieve pg_stat_statement.max GUC value
+ * Retrieve pg_stat_statement.max GUC value and store it into pgsk_max, since
+ * we want to store the same number of entries as pg_stat_statements. Don't do
+ * anything if pgsk_max is already set.
  */
 static void pgsk_setmax(void)
 {
 	const char *pgss_max;
 	const char *name = "pg_stat_statements.max";
+
+	if (pgsk_max != 0)
+		return;
+
 	pgss_max = GetConfigOption(name, false, false);
 	pgsk_max = atoi(pgss_max);
 }
@@ -385,6 +391,8 @@ static void pgsk_setmax(void)
 static Size pgsk_memsize(void)
 {
 	Size	size;
+
+	Assert(pgsk_max != 0);
 
 	size = MAXALIGN(sizeof(pgskSharedState));
 	size = add_size(size, hash_estimate_size(pgsk_max, sizeof(pgskEntry)));
