@@ -385,7 +385,21 @@ static void pgsk_setmax(void)
 	if (pgsk_max != 0)
 		return;
 
-	pgss_max = GetConfigOption(name, false, false);
+	pgss_max = GetConfigOption(name, true, false);
+
+	/*
+	 * Retrieving pg_stat_statements.max can fail if pgss is loaded after pgsk
+	 * in shared_preload_libraries.  Hint user in case this happens.
+	 */
+	if (!pgss_max)
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_OBJECT),
+				 errmsg("unrecognized configuration parameter \"%s\"",
+						name),
+				 errhint("make sure pg_stat_statements is loaded,\n"
+					 "and make sure pg_stat_kcache is present before pg_stat_statements"
+					 " in the shared_preload_libraries setting")));
+
 	pgsk_max = atoi(pgss_max);
 }
 
