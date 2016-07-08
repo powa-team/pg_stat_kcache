@@ -397,7 +397,7 @@ static void pgsk_setmax(void)
 				 errmsg("unrecognized configuration parameter \"%s\"",
 						name),
 				 errhint("make sure pg_stat_statements is loaded,\n"
-					 "and make sure pg_stat_kcache is present before pg_stat_statements"
+					 "and make sure pg_stat_kcache is present after pg_stat_statements"
 					 " in the shared_preload_libraries setting")));
 
 	pgsk_max = atoi(pgss_max);
