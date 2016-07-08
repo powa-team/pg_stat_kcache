@@ -1,8 +1,9 @@
-/*
- * pg_stat_kcache (kcache)
+/*----------------
+ * pg_stat_kcache
  *
  * Provides basic statistics about real I/O done by the filesystem layer.
- * This way, calculating a real hit-ratio is doable.
+ * This way, calculating a real hit-ratio is doable.  Also provides basis
+ * statistics about CPU usage.
  *
  * Large portions of code freely inspired by pg_stat_plans. Thanks to Peter
  * Geoghegan for this great extension.
@@ -688,15 +689,6 @@ pg_stat_kcache_reset(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
-/*
- * Show the amount of reads and writes per sessions
- *
-Datum
-pg_stat_kcache_session(PG_FUNCTION_ARGS)
-{
-
-}
-*/
 Datum
 pg_stat_kcache(PG_FUNCTION_ARGS)
 {
