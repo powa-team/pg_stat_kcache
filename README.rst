@@ -29,13 +29,15 @@ PostgreSQL setup
 
 The extension is now available. But, as it requires some shared memory to hold
 its counters, the module must be loaded at PostgreSQL startup. Thus, you must
-add the module to ``shared_preload_libraries`` in your ``postgresql.conf``. You need a
-server restart to take the change into account.
+add the module to ``shared_preload_libraries`` in your ``postgresql.conf``. You
+need a server restart to take the change into account.  As this extension
+depends on pg_stat_statements, it also need to be added to
+``shared_preload_libraries``.
 
 Add the following parameters into you ``postgresql.conf``::
 
  # postgresql.conf
- shared_preload_libraries = 'pg_stat_kcache'
+ shared_preload_libraries = 'pg_stat_statements,pg_stat_kcache'
 
 Once your PostgreSQL cluster is restarted, you can install the extension in every
 database where you need to access the statistics::
