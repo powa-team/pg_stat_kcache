@@ -1,4 +1,4 @@
-## 2.0.3 (WIP)
+## 2.0.3 (2016-10-03)
   - Add PG 9.6 compatibility
   - Fix issues in shared memory estimation, which could prevent starting
     postgres or reduce the amount of possible locks (thanks to Jean-Sébastien
