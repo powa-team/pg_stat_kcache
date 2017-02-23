@@ -140,6 +140,11 @@ static void entry_store(uint32 queryId, int64 reads, int64 writes,
 static uint32 pgsk_hash_fn(const void *key, Size keysize);
 static int	pgsk_match_fn(const void *key1, const void *key2, Size keysize);
 
+
+static bool pgsk_assign_linux_hz_check_hook(int *newval, void **extra, GucSource source);
+
+static int	pgsk_linux_hz;
+
 void
 _PG_init(void)
 {
@@ -148,10 +153,23 @@ _PG_init(void)
 		elog(ERROR, "This module can only be loaded via shared_preload_libraries");
 		return;
 	}
+	DefineCustomIntVariable("pg_stat_kcache.linux_hz",
+				"Inform pg_stat_kcache of the linux CONFIG_HZ config option",
+		  "This is used by pg_stat_kcache to compensate for sampling errors "
+							"in getrusage due to the kernel adhering to its ticks. The default value, -1, "
+							"tries to guess it at startup. ",
+							&pgsk_linux_hz,
+							-1,
+							-1,
+							INT_MAX,
+							PGC_USERSET,
+							0,
+							pgsk_assign_linux_hz_check_hook,
+							NULL,
+							NULL);
 
 	/* set pgsk_max if needed */
 	pgsk_setmax();
-
 	RequestAddinShmemSpace(pgsk_memsize());
 #if PG_VERSION_NUM >= 90600
 	RequestNamedLWLockTranche("pg_stat_kcache", 1);
@@ -176,6 +194,32 @@ _PG_fini(void)
 	ExecutorEnd_hook = prev_ExecutorEnd;
 	shmem_startup_hook = prev_shmem_startup_hook;
 }
+
+static bool
+pgsk_assign_linux_hz_check_hook(int *newval, void **extra, GucSource source)
+{
+	int			val = *newval;
+	struct rusage myrusage;
+	struct timeval previous_value;
+
+	/* In that case we try to guess it */
+	if (val == -1)
+	{
+		elog(NOTICE, "Auto detecting pg_stat_kcache.linux_hz parameter...");
+		getrusage(RUSAGE_SELF, &myrusage);
+		previous_value = myrusage.ru_utime;
+		while (myrusage.ru_utime.tv_usec == previous_value.tv_usec &&
+			   myrusage.ru_utime.tv_sec == previous_value.tv_sec)
+		{
+			getrusage(RUSAGE_SELF, &myrusage);
+		}
+		*newval = (int) (1 / ((myrusage.ru_utime.tv_sec - previous_value.tv_sec) +
+		   (myrusage.ru_utime.tv_usec - previous_value.tv_usec) / 1000000.));
+		elog(NOTICE, "pg_stat_kcache.linux_hz is set to %d", *newval);
+	}
+	return true;
+}
+
 
 static void
 pgsk_shmem_startup(void)
@@ -638,11 +682,25 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 	queryId = queryDesc->plannedstmt->queryId;
 
 	/* Compute CPU time delta */
-	utime = ( (double) own_rusage.ru_utime.tv_sec + (double) own_rusage.ru_utime.tv_usec / 1000000.0 )
-		- ( (double) counters.current_utime.tv_sec + (double) counters.current_utime.tv_usec / 1000000.0 );
-	stime = ( (double) own_rusage.ru_stime.tv_sec + (double) own_rusage.ru_stime.tv_usec / 1000000.0 )
-		- ( (double) counters.current_stime.tv_sec + (double) counters.current_stime.tv_usec / 1000000.0 );
+	utime = ((double) own_rusage.ru_utime.tv_sec + (double) own_rusage.ru_utime.tv_usec / 1000000.0)
+		- ((double) counters.current_utime.tv_sec + (double) counters.current_utime.tv_usec / 1000000.0);
+	stime = ((double) own_rusage.ru_stime.tv_sec + (double) own_rusage.ru_stime.tv_usec / 1000000.0)
+		- ((double) counters.current_stime.tv_sec + (double) counters.current_stime.tv_usec / 1000000.0);
+	if (queryDesc->totaltime)
+	{
+		/* Make sure stats accumulation is done */
+		InstrEndLoop(queryDesc->totaltime);
 
+		/*
+		 * We only consider values greater than 3 * linux tick, otherwise the
+		 * bias is too big
+		 */
+		if (queryDesc->totaltime->total < (3. / pgsk_linux_hz))
+		{
+			stime = 0;
+			utime = queryDesc->totaltime->total;
+		}
+	}
 	/* store current number of block reads and writes */
 	entry_store(queryId, own_rusage.ru_inblock - counters.current_reads,
 			own_rusage.ru_oublock - counters.current_writes,
