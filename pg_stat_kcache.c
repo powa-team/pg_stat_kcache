@@ -544,16 +544,16 @@ static pgskEntry *entry_alloc(pgskHashKey *key, bool sticky)
 
 		/* set the appropriate initial usage count */
 		entry->usage = sticky ? pgsk->cur_median_usage : USAGE_INIT;
+		/* initialize the counters */
+		entry->calls = 0;
+		entry->reads = 0;
+		entry->writes = 0;
+		entry->utime = (0.0);
+		entry->stime = (0.0);
+		entry->usage = (0.0);
 		/* re-initialize the mutex each time ... we assume no one using it */
 		SpinLockInit(&entry->mutex);
 	}
-
-	entry->calls = 0;
-	entry->reads = 0;
-	entry->writes = 0;
-	entry->utime = (0.0);
-	entry->stime = (0.0);
-	entry->usage = (0.0);
 
 	return entry;
 }
