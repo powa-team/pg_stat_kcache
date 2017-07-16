@@ -205,7 +205,7 @@ pgsk_assign_linux_hz_check_hook(int *newval, void **extra, GucSource source)
 	/* In that case we try to guess it */
 	if (val == -1)
 	{
-		elog(NOTICE, "Auto detecting pg_stat_kcache.linux_hz parameter...");
+		elog(LOG, "Auto detecting pg_stat_kcache.linux_hz parameter...");
 		getrusage(RUSAGE_SELF, &myrusage);
 		previous_value = myrusage.ru_utime;
 		while (myrusage.ru_utime.tv_usec == previous_value.tv_usec &&
@@ -215,7 +215,7 @@ pgsk_assign_linux_hz_check_hook(int *newval, void **extra, GucSource source)
 		}
 		*newval = (int) (1 / ((myrusage.ru_utime.tv_sec - previous_value.tv_sec) +
 		   (myrusage.ru_utime.tv_usec - previous_value.tv_usec) / 1000000.));
-		elog(NOTICE, "pg_stat_kcache.linux_hz is set to %d", *newval);
+		elog(LOG, "pg_stat_kcache.linux_hz is set to %d", *newval);
 	}
 	return true;
 }
