@@ -1,10 +1,10 @@
 ## 2.0.4 (WIP)
-  - Do not install docs anymore
+  - Do not install docs anymore (Ronan Dunklau)
   - Add a workaround for sampling problems with getrusage(), new parameter
     pg_stat_kcache.linux_hz is added.  By default, this parameter is discovered
     at server startup (Ronan Dunklau).
   - Fix issue when concurrently created entries for the same user, db and
-    queryid could lost some execution counters
+    queryid could lost some execution counters (Mael Rimbault)
 
 ## 2.0.3 (2016-10-03)
   - Add PG 9.6 compatibility
