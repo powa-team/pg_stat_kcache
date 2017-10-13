@@ -39,6 +39,14 @@ PG_MODULE_MAGIC;
 #define PGSK_DUMP_FILE		"global/pg_stat_kcache.stat"
 #endif
 
+/* In PostgreSQL 11, queryid becomes a uint64 internally.
+ */
+#if PG_VERSION_NUM >= 110000
+typedef uint64 pgsk_queryid;
+#else
+typedef uint32 pgsk_queryid;
+#endif
+
 #define PG_STAT_KCACHE_COLS 7
 #define USAGE_DECREASE_FACTOR	(0.99)	/* decreased every entry_dealloc */
 #define STICKY_DECREASE_FACTOR	(0.50)	/* factor for sticky entries */
@@ -76,7 +84,7 @@ typedef struct pgskHashKey
 {
 	Oid			userid;			/* user OID */
 	Oid			dbid;			/* database OID */
-	uint32		queryid;		/* query identifier */
+	pgsk_queryid		queryid;		/* query identifier */
 } pgskHashKey;
 
 /*
@@ -134,7 +142,7 @@ static void pgsk_ExecutorEnd(QueryDesc *queryDesc);
 static pgskEntry *entry_alloc(pgskHashKey *key, bool sticky);
 static void entry_dealloc(void);
 static void entry_reset(void);
-static void entry_store(uint32 queryId, int64 reads, int64 writes,
+static void entry_store(pgsk_queryid queryId, int64 reads, int64 writes,
 						double utime,
 						double stime);
 static uint32 pgsk_hash_fn(const void *key, Size keysize);
@@ -264,6 +272,7 @@ pgsk_shmem_startup(void)
 	info.entrysize = sizeof(pgskEntry);
 	info.hash = pgsk_hash_fn;
 	info.match = pgsk_match_fn;
+
 	/* allocate stats shared memory hash */
 	pgsk_hash = ShmemInitHash("pg_stat_kcache hash",
 							  pgsk_max, pgsk_max,
@@ -465,7 +474,7 @@ static Size pgsk_memsize(void)
  */
 
 static void
-entry_store(uint32 queryId, int64 reads, int64 writes,
+entry_store(pgsk_queryid queryId, int64 reads, int64 writes,
 						double utime,
 						double stime)
 {
@@ -671,7 +680,7 @@ pgsk_ExecutorStart (QueryDesc *queryDesc, int eflags)
 static void
 pgsk_ExecutorEnd (QueryDesc *queryDesc)
 {
-	uint32 queryId;
+	pgsk_queryid queryId;
 
 	double utime;
 	double stime;
