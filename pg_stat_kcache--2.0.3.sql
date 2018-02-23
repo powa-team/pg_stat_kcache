@@ -1,7 +1,8 @@
 -- This program is open source, licensed under the PostgreSQL License.
 -- For license terms, see the LICENSE file.
 --
--- Copyright (C) 2014: Dalibo
+-- Copyright (c) 2014-2017, Dalibo
+-- Copyright (c) 2018, The PoWA-team
 
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION pg_stat_kernel" to load this file. \quit

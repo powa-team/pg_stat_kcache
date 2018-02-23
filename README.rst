@@ -19,7 +19,7 @@ Compiling
 The module can be built using the standard PGXS infrastructure. For this to work, the
 ``pg_config`` program must be available in your $PATH. Instruction to install follows::
 
- git clone https://github.com/dalibo/pg_stat_kcache.git
+ git clone https://github.com/powa-team/pg_stat_kcache.git
  cd pg_stat_kcache
  make
  make install
@@ -157,5 +157,6 @@ License
 
 pg_stat_kcache is free software distributed under the PostgreSQL license.
 
-Copyright (c) 2014, dalibo.
+Copyright (c) 2014-2017, Dalibo
+Copyright (c) 2018, The PoWA-team
 
