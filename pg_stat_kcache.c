@@ -12,12 +12,19 @@
  * For license terms, see the LICENSE file.
  *
  */
-#include <sys/time.h>
-#include <sys/resource.h>
 
 #include "postgres.h"
 
 #include <unistd.h>
+
+#ifdef HAVE_SYS_RESOURCE_H
+#include <sys/time.h>
+#include <sys/resource.h>
+#endif
+
+#ifndef HAVE_GETRUSAGE
+#include "rusagestub.h"
+#endif
 
 #include "access/hash.h"
 #include "executor/executor.h"
@@ -48,7 +55,7 @@ typedef uint32 pgsk_queryid;
 #endif
 
 #define PG_STAT_KCACHE_COLS 7
-#define USAGE_DECREASE_FACTOR	(0.99)	/* decreased every entry_dealloc */
+#define USAGE_DECREASE_FACTOR	(0.99)	/* decreased every pgsk_entry_dealloc */
 #define STICKY_DECREASE_FACTOR	(0.50)	/* factor for sticky entries */
 #define USAGE_DEALLOC_PERCENT	5		/* free this % of entries at once */
 #define USAGE_INIT				(1.0)	/* including initial planning */
@@ -58,21 +65,32 @@ typedef uint32 pgsk_queryid;
  */
 #define RUSAGE_BLOCK_SIZE	512			/* Size of a block for getrusage() */
 
+#define TIMEVAL_DIFF(start, end) ((double) end.tv_sec + (double) end.tv_usec / 1000000.0) \
+	- ((double) start.tv_sec + (double) start.tv_usec / 1000000.0)
+
 static const uint32 PGSK_FILE_HEADER = 0x0d756e0f;
 
-struct	rusage own_rusage;
+static struct	rusage rusage_start;
 
 /*
- * Current read and write values, as returned by getrusage
+ * Current getrusage counters.
+ *
+ * For platform without getrusage support, we rely on postgres implementation
+ * defined in rusagestub.h, which only supports user and system time.
 */
 typedef struct pgskCounters
 {
-	int64				current_reads;	/* Physical block reads */
-	int64				current_writes;	/* Physical block writes */
-	struct	timeval		current_utime;	/* CPU user time */
-	struct	timeval		current_stime;	/* CPU system time */
+	int64			calls;		/* # of times executed */
+	double			usage;		/* usage factor */
+	/* These fields are only used for platform with HAVE_GETRUSAGE defined */
+#ifdef HAVE_GETRUSAGE
+	int64			reads;	/* Physical block reads */
+	int64			writes;	/* Physical block writes */
+#endif
+	/* These fields are always used */
+	float8			utime;	/* CPU user time */
+	float8			stime;	/* CPU system time */
 } pgskCounters;
-pgskCounters	counters = {0, 0, {0, 0}, {0, 0}};
 
 static int	pgsk_max = 0;	/* max #queries to store. pg_stat_statements.max is used */
 
@@ -92,14 +110,9 @@ typedef struct pgskHashKey
  */
 typedef struct pgskEntry
 {
-	pgskHashKey	key;		/* hash key of entry - MUST BE FIRST */
-	int64		calls;		/* # of times executed */
-	int64		reads;		/* number of physical reads per database and per statement kind */
-	int64		writes;		/* number of physical writes per database and per statement kind */
-	float8		utime;		/* CPU user time per database and per statement kind */
-	float8		stime;		/* CPU system time per database and per statement kind */
-	double		usage;		/* usage factor */
-	slock_t		mutex;		/* protects the counters only */
+	pgskHashKey		key;		/* hash key of entry - MUST BE FIRST */
+	pgskCounters	counters;	/* statistics for this query */
+	slock_t			mutex;		/* protects the counters only */
 } pgskEntry;
 
 /*
@@ -126,8 +139,8 @@ static HTAB *pgsk_hash = NULL;
 void	_PG_init(void);
 void	_PG_fini(void);
 
-Datum	pg_stat_kcache_reset(PG_FUNCTION_ARGS);
-Datum	pg_stat_kcache(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum	pg_stat_kcache_reset(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum	pg_stat_kcache(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pg_stat_kcache_reset);
 PG_FUNCTION_INFO_V1(pg_stat_kcache);
@@ -139,12 +152,10 @@ static void pgsk_shmem_startup(void);
 static void pgsk_shmem_shutdown(int code, Datum arg);
 static void pgsk_ExecutorStart(QueryDesc *queryDesc, int eflags);
 static void pgsk_ExecutorEnd(QueryDesc *queryDesc);
-static pgskEntry *entry_alloc(pgskHashKey *key, bool sticky);
-static void entry_dealloc(void);
-static void entry_reset(void);
-static void entry_store(pgsk_queryid queryId, int64 reads, int64 writes,
-						double utime,
-						double stime);
+static pgskEntry *pgsk_entry_alloc(pgskHashKey *key, bool sticky);
+static void pgsk_entry_dealloc(void);
+static void pgsk_entry_reset(void);
+static void pgsk_entry_store(pgsk_queryid queryId, pgskCounters counters);
 static uint32 pgsk_hash_fn(const void *key, Size keysize);
 static int	pgsk_match_fn(const void *key1, const void *key2, Size keysize);
 
@@ -317,18 +328,13 @@ pgsk_shmem_startup(void)
 			goto error;
 
 		/* Skip loading "sticky" entries */
-		if (temp.calls == 0)
+		if (temp.counters.calls == 0)
 			continue;
 
-		entry = entry_alloc(&temp.key, false);
+		entry = pgsk_entry_alloc(&temp.key, false);
 
 		/* copy in the actual stats */
-		entry->calls = temp.calls;
-		entry->reads = temp.reads;
-		entry->writes = temp.writes;
-		entry->utime = temp.utime;
-		entry->stime = temp.stime;
-		entry->usage = temp.usage;
+		entry->counters = temp.counters;
 		/* don't initialize spinlock, already done */
 	}
 
@@ -474,9 +480,7 @@ static Size pgsk_memsize(void)
  */
 
 static void
-entry_store(pgsk_queryid queryId, int64 reads, int64 writes,
-						double utime,
-						double stime)
+pgsk_entry_store(pgsk_queryid queryId, pgskCounters counters)
 {
 	volatile pgskEntry *e;
 
@@ -505,7 +509,7 @@ entry_store(pgsk_queryid queryId, int64 reads, int64 writes,
 		LWLockAcquire(pgsk->lock, LW_EXCLUSIVE);
 
 		/* OK to create a new hashtable entry */
-		entry = entry_alloc(&key, false);
+		entry = pgsk_entry_alloc(&key, false);
 	}
 
 	/*
@@ -517,14 +521,16 @@ entry_store(pgsk_queryid queryId, int64 reads, int64 writes,
 	SpinLockAcquire(&e->mutex);
 
 	/* "Unstick" entry if it was previously sticky */
-	if (e->calls == 0)
-		e->usage = USAGE_INIT;
+	if (e->counters.calls == 0)
+		e->counters.usage = USAGE_INIT;
 
-	e->calls += 1;
-	e->reads += reads;
-	e->writes += writes;
-	e->utime += utime;
-	e->stime += stime;
+	e->counters.calls += 1;
+#ifdef HAVE_GETRUSAGE
+	e->counters.reads += counters.reads;
+	e->counters.writes += counters.writes;
+#endif
+	e->counters.utime += counters.utime;
+	e->counters.stime += counters.stime;
 
 	SpinLockRelease(&e->mutex);
 
@@ -535,14 +541,14 @@ entry_store(pgsk_queryid queryId, int64 reads, int64 writes,
  * Allocate a new hashtable entry.
  * caller must hold an exclusive lock on pgsk->lock
  */
-static pgskEntry *entry_alloc(pgskHashKey *key, bool sticky)
+static pgskEntry *pgsk_entry_alloc(pgskHashKey *key, bool sticky)
 {
 	pgskEntry  *entry;
 	bool		found;
 
 	/* Make space if needed */
 	while (hash_get_num_entries(pgsk_hash) >= pgsk_max)
-		entry_dealloc();
+		pgsk_entry_dealloc();
 
 	/* Find or create an entry with desired hash code */
 	entry = (pgskEntry *) hash_search(pgsk_hash, key, HASH_ENTER, &found);
@@ -551,15 +557,10 @@ static pgskEntry *entry_alloc(pgskHashKey *key, bool sticky)
 	{
 		/* New entry, initialize it */
 
+		/* reset the statistics */
+		memset(&entry->counters, 0, sizeof(pgskCounters));
 		/* set the appropriate initial usage count */
-		entry->usage = sticky ? pgsk->cur_median_usage : USAGE_INIT;
-		/* initialize the counters */
-		entry->calls = 0;
-		entry->reads = 0;
-		entry->writes = 0;
-		entry->utime = (0.0);
-		entry->stime = (0.0);
-		entry->usage = (0.0);
+		entry->counters.usage = sticky ? pgsk->cur_median_usage : USAGE_INIT;
 		/* re-initialize the mutex each time ... we assume no one using it */
 		SpinLockInit(&entry->mutex);
 	}
@@ -573,8 +574,8 @@ static pgskEntry *entry_alloc(pgskHashKey *key, bool sticky)
 static int
 entry_cmp(const void *lhs, const void *rhs)
 {
-	double		l_usage = (*(pgskEntry *const *) lhs)->usage;
-	double		r_usage = (*(pgskEntry *const *) rhs)->usage;
+	double		l_usage = (*(pgskEntry *const *) lhs)->counters.usage;
+	double		r_usage = (*(pgskEntry *const *) rhs)->counters.usage;
 
 	if (l_usage < r_usage)
 		return -1;
@@ -589,7 +590,7 @@ entry_cmp(const void *lhs, const void *rhs)
  * Caller must hold an exclusive lock on pgsk->lock.
  */
 static void
-entry_dealloc(void)
+pgsk_entry_dealloc(void)
 {
 	HASH_SEQ_STATUS hash_seq;
 	pgskEntry **entries;
@@ -602,7 +603,6 @@ entry_dealloc(void)
 	 * While we're scanning the table, apply the decay factor to the usage
 	 * values.
 	 */
-
 	entries = palloc(hash_get_num_entries(pgsk_hash) * sizeof(pgskEntry *));
 
 	i = 0;
@@ -611,10 +611,10 @@ entry_dealloc(void)
 	{
 		entries[i++] = entry;
 		/* "Sticky" entries get a different usage decay rate. */
-		if (entry->calls == 0)
-			entry->usage *= STICKY_DECREASE_FACTOR;
+		if (entry->counters.calls == 0)
+			entry->counters.usage *= STICKY_DECREASE_FACTOR;
 		else
-			entry->usage *= USAGE_DECREASE_FACTOR;
+			entry->counters.usage *= USAGE_DECREASE_FACTOR;
 	}
 
 	qsort(entries, i, sizeof(pgskEntry *), entry_cmp);
@@ -622,7 +622,7 @@ entry_dealloc(void)
 	if (i > 0)
 	{
 		/* Record the (approximate) median usage */
-		pgsk->cur_median_usage = entries[i / 2]->usage;
+		pgsk->cur_median_usage = entries[i / 2]->counters.usage;
 	}
 
 	nvictims = Max(10, i * USAGE_DEALLOC_PERCENT / 100);
@@ -636,7 +636,7 @@ entry_dealloc(void)
 	pfree(entries);
 }
 
-static void entry_reset(void)
+static void pgsk_entry_reset(void)
 {
 	HASH_SEQ_STATUS hash_seq;
 	pgskEntry  *entry;
@@ -659,16 +659,8 @@ static void entry_reset(void)
 static void
 pgsk_ExecutorStart (QueryDesc *queryDesc, int eflags)
 {
-	/* capture kernel usage stats in own_rusage */
-	getrusage(RUSAGE_SELF, &own_rusage);
-
-	/* store current number of block reads */
-	counters.current_reads = own_rusage.ru_inblock;
-	counters.current_writes = own_rusage.ru_oublock;
-	counters.current_utime.tv_sec = own_rusage.ru_utime.tv_sec;
-	counters.current_utime.tv_usec = own_rusage.ru_utime.tv_usec;
-	counters.current_stime.tv_sec = own_rusage.ru_stime.tv_sec;
-	counters.current_stime.tv_usec = own_rusage.ru_stime.tv_usec;
+	/* capture kernel usage stats in rusage_start */
+	getrusage(RUSAGE_SELF, &rusage_start);
 
 	/* give control back to PostgreSQL */
 	if (prev_ExecutorStart)
@@ -681,20 +673,18 @@ static void
 pgsk_ExecutorEnd (QueryDesc *queryDesc)
 {
 	pgsk_queryid queryId;
+	struct rusage rusage_end;
+	pgskCounters counters;
 
-	double utime;
-	double stime;
-
-	/* capture kernel usage stats in own_rusage */
-	getrusage(RUSAGE_SELF, &own_rusage);
+	/* capture kernel usage stats in rusage_end */
+	getrusage(RUSAGE_SELF, &rusage_end);
 
 	queryId = queryDesc->plannedstmt->queryId;
 
 	/* Compute CPU time delta */
-	utime = ((double) own_rusage.ru_utime.tv_sec + (double) own_rusage.ru_utime.tv_usec / 1000000.0)
-		- ((double) counters.current_utime.tv_sec + (double) counters.current_utime.tv_usec / 1000000.0);
-	stime = ((double) own_rusage.ru_stime.tv_sec + (double) own_rusage.ru_stime.tv_usec / 1000000.0)
-		- ((double) counters.current_stime.tv_sec + (double) counters.current_stime.tv_usec / 1000000.0);
+	counters.utime = TIMEVAL_DIFF(rusage_start.ru_utime, rusage_end.ru_utime);
+	counters.stime = TIMEVAL_DIFF(rusage_start.ru_stime, rusage_end.ru_stime);
+
 	if (queryDesc->totaltime)
 	{
 		/* Make sure stats accumulation is done */
@@ -706,16 +696,19 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 		 */
 		if (queryDesc->totaltime->total < (3. / pgsk_linux_hz))
 		{
-			stime = 0;
-			utime = queryDesc->totaltime->total;
+			counters.stime = 0;
+			counters.utime = queryDesc->totaltime->total;
 		}
 	}
+
+#ifdef HAVE_GETRUSAGE
+	/* Compute the rest of the counters */
+	counters.reads = rusage_end.ru_inblock - rusage_start.ru_inblock;
+	counters.writes = rusage_end.ru_oublock - rusage_start.ru_oublock;
+#endif
+
 	/* store current number of block reads and writes */
-	entry_store(queryId, own_rusage.ru_inblock - counters.current_reads,
-			own_rusage.ru_oublock - counters.current_writes,
-			utime,
-			stime
-	);
+	pgsk_entry_store(queryId, counters);
 
 	/* give control back to PostgreSQL */
 	if (prev_ExecutorEnd)
@@ -758,7 +751,7 @@ pgsk_match_fn(const void *key1, const void *key2, Size keysize)
 /*
  * Reset statistics.
  */
-Datum
+PGDLLEXPORT Datum
 pg_stat_kcache_reset(PG_FUNCTION_ARGS)
 {
 	if (!pgsk)
@@ -766,11 +759,11 @@ pg_stat_kcache_reset(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("pg_stat_kcache must be loaded via shared_preload_libraries")));
 
-	entry_reset();
+	pgsk_entry_reset();
 	PG_RETURN_VOID();
 }
 
-Datum
+PGDLLEXPORT Datum
 pg_stat_kcache(PG_FUNCTION_ARGS)
 {
 	ReturnSetInfo	*rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
@@ -817,32 +810,44 @@ pg_stat_kcache(PG_FUNCTION_ARGS)
 	hash_seq_init(&hash_seq, pgsk_hash);
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
-		Datum		values[PG_STAT_KCACHE_COLS];
-		bool		nulls[PG_STAT_KCACHE_COLS];
-		int64		reads, writes;
-		int			i = 0;
+		Datum			values[PG_STAT_KCACHE_COLS];
+		bool			nulls[PG_STAT_KCACHE_COLS];
+		pgskCounters	tmp;
+		int				i = 0;
+#ifdef HAVE_GETRUSAGE
+		int64			reads, writes;
+#endif
 
 		memset(values, 0, sizeof(values));
 		memset(nulls, 0, sizeof(nulls));
 
-		SpinLockAcquire(&entry->mutex);
+		/* copy counters to a local variable to keep locking time short */
+		{
+			volatile pgskEntry *e = (volatile pgskEntry *) entry;
+
+			SpinLockAcquire(&e->mutex);
+			tmp = e->counters;
+			SpinLockRelease(&e->mutex);
+		}
 
 		/* Skip entry if unexecuted (ie, it's a pending "sticky" entry) */
-		if ( entry->calls == 0)
-		{
-			SpinLockRelease(&entry->mutex);
+		if ( tmp.calls == 0)
 			continue;
-		}
-		reads = entry->reads * RUSAGE_BLOCK_SIZE;
-		writes = entry->writes * RUSAGE_BLOCK_SIZE;
+
 		values[i++] = Int64GetDatum(entry->key.queryid);
 		values[i++] = ObjectIdGetDatum(entry->key.userid);
 		values[i++] = ObjectIdGetDatum(entry->key.dbid);
+#ifdef HAVE_GETRUSAGE
+		reads = tmp.reads * RUSAGE_BLOCK_SIZE;
+		writes = tmp.writes * RUSAGE_BLOCK_SIZE;
 		values[i++] = Int64GetDatumFast(reads);
 		values[i++] = Int64GetDatumFast(writes);
-		values[i++] = Float8GetDatumFast(entry->utime);
-		values[i++] = Float8GetDatumFast(entry->stime);
-		SpinLockRelease(&entry->mutex);
+#else
+		nulls[i++] = true; /* reads */
+		nulls[i++] = true; /* writes */
+#endif
+		values[i++] = Float8GetDatumFast(tmp.utime);
+		values[i++] = Float8GetDatumFast(tmp.stime);
 
 		Assert(i == PG_STAT_KCACHE_COLS);
 

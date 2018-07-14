@@ -1,4 +1,7 @@
 ## 2.0.4 (WIP)
+  - Add support for architecture that don't provide getrusage(2), such as
+    windows.  Only user time and system time will be available on such
+    platforms (Julien Rouhaud).
   - Do not install docs anymore (Ronan Dunklau)
   - Add a workaround for sampling problems with getrusage(), new parameter
     pg_stat_kcache.linux_hz is added.  By default, this parameter is discovered
