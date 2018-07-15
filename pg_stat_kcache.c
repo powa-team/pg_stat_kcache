@@ -54,7 +54,10 @@ typedef uint64 pgsk_queryid;
 typedef uint32 pgsk_queryid;
 #endif
 
-#define PG_STAT_KCACHE_COLS 7
+#define PG_STAT_KCACHE_COLS_V2_0	7
+#define PG_STAT_KCACHE_COLS_V2_1	15
+#define PG_STAT_KCACHE_COLS			15	/* maximum of above */
+
 #define USAGE_DECREASE_FACTOR	(0.99)	/* decreased every pgsk_entry_dealloc */
 #define STICKY_DECREASE_FACTOR	(0.50)	/* factor for sticky entries */
 #define USAGE_DEALLOC_PERCENT	5		/* free this % of entries at once */
@@ -68,7 +71,16 @@ typedef uint32 pgsk_queryid;
 #define TIMEVAL_DIFF(start, end) ((double) end.tv_sec + (double) end.tv_usec / 1000000.0) \
 	- ((double) start.tv_sec + (double) start.tv_usec / 1000000.0)
 
-static const uint32 PGSK_FILE_HEADER = 0x0d756e0f;
+/*
+ * Extension version number, for supporting older extension versions' objects
+ */
+typedef enum pgskVersion
+{
+	PGSK_V2_0 = 0,
+	PGSK_V2_1
+} pgskVersion;
+
+static const uint32 PGSK_FILE_HEADER = 0x0d756e10;
 
 static struct	rusage rusage_start;
 
@@ -82,14 +94,22 @@ typedef struct pgskCounters
 {
 	int64			calls;		/* # of times executed */
 	double			usage;		/* usage factor */
-	/* These fields are only used for platform with HAVE_GETRUSAGE defined */
-#ifdef HAVE_GETRUSAGE
-	int64			reads;	/* Physical block reads */
-	int64			writes;	/* Physical block writes */
-#endif
 	/* These fields are always used */
-	float8			utime;	/* CPU user time */
-	float8			stime;	/* CPU system time */
+	float8			utime;		/* CPU user time */
+	float8			stime;		/* CPU system time */
+#ifdef HAVE_GETRUSAGE
+	/* These fields are only used for platform with HAVE_GETRUSAGE defined */
+	int64			minflts;	/* page reclaims (soft page faults) */
+	int64			majflts;	/* page faults (hard page faults) */
+	int64			nswaps;		/* page faults (hard page faults) */
+	int64			reads;		/* Physical block reads */
+	int64			writes;		/* Physical block writes */
+	int64			msgsnds;	/* IPC messages sent */
+	int64			msgrcvs;	/* IPC messages received */
+	int64			nsignals;	/* signals received */
+	int64			nvcsws;		/* voluntary context witches */
+	int64			nivcsws;	/* unvoluntary context witches */
+#endif
 } pgskCounters;
 
 static int	pgsk_max = 0;	/* max #queries to store. pg_stat_statements.max is used */
@@ -141,9 +161,14 @@ void	_PG_fini(void);
 
 extern PGDLLEXPORT Datum	pg_stat_kcache_reset(PG_FUNCTION_ARGS);
 extern PGDLLEXPORT Datum	pg_stat_kcache(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum	pg_stat_kcache_2_1(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pg_stat_kcache_reset);
 PG_FUNCTION_INFO_V1(pg_stat_kcache);
+PG_FUNCTION_INFO_V1(pg_stat_kcache_2_1);
+
+static void pg_stat_kcache_internal(FunctionCallInfo fcinfo, pgskVersion
+		api_version);
 
 static void pgsk_setmax(void);
 static Size pgsk_memsize(void);
@@ -525,12 +550,20 @@ pgsk_entry_store(pgsk_queryid queryId, pgskCounters counters)
 		e->counters.usage = USAGE_INIT;
 
 	e->counters.calls += 1;
-#ifdef HAVE_GETRUSAGE
-	e->counters.reads += counters.reads;
-	e->counters.writes += counters.writes;
-#endif
 	e->counters.utime += counters.utime;
 	e->counters.stime += counters.stime;
+#ifdef HAVE_GETRUSAGE
+	e->counters.minflts += counters.minflts;
+	e->counters.majflts += counters.majflts;
+	e->counters.nswaps += counters.nswaps;
+	e->counters.reads += counters.reads;
+	e->counters.writes += counters.writes;
+	e->counters.msgsnds += counters.msgsnds;
+	e->counters.msgrcvs += counters.msgrcvs;
+	e->counters.nsignals += counters.nsignals;
+	e->counters.nvcsws += counters.nvcsws;
+	e->counters.nivcsws += counters.nivcsws;
+#endif
 
 	SpinLockRelease(&e->mutex);
 
@@ -703,8 +736,16 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 
 #ifdef HAVE_GETRUSAGE
 	/* Compute the rest of the counters */
+	counters.minflts = rusage_end.ru_minflt - rusage_start.ru_minflt;
+	counters.majflts = rusage_end.ru_majflt - rusage_start.ru_majflt;
+	counters.nswaps = rusage_end.ru_nswap - rusage_start.ru_nswap;
 	counters.reads = rusage_end.ru_inblock - rusage_start.ru_inblock;
 	counters.writes = rusage_end.ru_oublock - rusage_start.ru_oublock;
+	counters.msgsnds = rusage_end.ru_msgsnd - rusage_start.ru_msgsnd;
+	counters.msgrcvs = rusage_end.ru_msgrcv - rusage_start.ru_msgrcv;
+	counters.nsignals = rusage_end.ru_nsignals - rusage_start.ru_nsignals;
+	counters.nvcsws = rusage_end.ru_nvcsw - rusage_start.ru_nvcsw;
+	counters.nivcsws = rusage_end.ru_nivcsw - rusage_start.ru_nivcsw;
 #endif
 
 	/* store current number of block reads and writes */
@@ -765,6 +806,22 @@ pg_stat_kcache_reset(PG_FUNCTION_ARGS)
 
 PGDLLEXPORT Datum
 pg_stat_kcache(PG_FUNCTION_ARGS)
+{
+	pg_stat_kcache_internal(fcinfo, PGSK_V2_0);
+
+	return (Datum) 0;
+}
+
+PGDLLEXPORT Datum
+pg_stat_kcache_2_1(PG_FUNCTION_ARGS)
+{
+	pg_stat_kcache_internal(fcinfo, PGSK_V2_1);
+
+	return (Datum) 0;
+}
+
+static void
+pg_stat_kcache_internal(FunctionCallInfo fcinfo, pgskVersion api_version)
 {
 	ReturnSetInfo	*rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
 	MemoryContext	per_query_ctx;
@@ -848,8 +905,32 @@ pg_stat_kcache(PG_FUNCTION_ARGS)
 #endif
 		values[i++] = Float8GetDatumFast(tmp.utime);
 		values[i++] = Float8GetDatumFast(tmp.stime);
+		if (api_version >= PGSK_V2_1)
+		{
+#ifdef HAVE_GETRUSAGE
+			values[i++] = Int64GetDatumFast(tmp.minflts);
+			values[i++] = Int64GetDatumFast(tmp.majflts);
+			values[i++] = Int64GetDatumFast(tmp.nswaps);
+			values[i++] = Int64GetDatumFast(tmp.msgsnds);
+			values[i++] = Int64GetDatumFast(tmp.msgrcvs);
+			values[i++] = Int64GetDatumFast(tmp.nsignals);
+			values[i++] = Int64GetDatumFast(tmp.nvcsws);
+			values[i++] = Int64GetDatumFast(tmp.nivcsws);
+#else
+			nulls[i++] = true; /* minflts */
+			nulls[i++] = true; /* majflts */
+			nulls[i++] = true; /* nswaps */
+			nulls[i++] = true; /* msgsnds */
+			nulls[i++] = true; /* msgrcvs */
+			nulls[i++] = true; /* nsignals */
+			nulls[i++] = true; /* nvcsws */
+			nulls[i++] = true; /* nivcsws */
+#endif
+		}
 
-		Assert(i == PG_STAT_KCACHE_COLS);
+		Assert(i == (api_version == PGSK_V2_0 ? PG_STAT_KCACHE_COLS_V2_0 :
+					 api_version == PGSK_V2_1 ? PG_STAT_KCACHE_COLS_V2_1 :
+					 -1 /* fail if you forget to update this assert */ ));
 
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 	}
@@ -858,7 +939,4 @@ pg_stat_kcache(PG_FUNCTION_ARGS)
 
 	/* clean up and return the tuplestore */
 	tuplestore_donestoring(tupstore);
-
-	return (Datum) 0;
 }
-

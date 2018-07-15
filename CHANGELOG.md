@@ -1,13 +1,20 @@
-## 2.0.4 (WIP)
+## 2.1.0 (WIP)
+
+**NOTE**: This version requires a change to the on-disk format.  After
+installing the new version restarting PostgreSQL, any previously accumulated
+statistics will be reset.
+
   - Add support for architecture that don't provide getrusage(2), such as
     windows.  Only user time and system time will be available on such
     platforms (Julien Rouhaud).
-  - Do not install docs anymore (Ronan Dunklau)
+  - Expose more fields of getrusage(2).  Depending on the platform, some of
+    these fields are not maintained (Julien Rouhaud).
   - Add a workaround for sampling problems with getrusage(), new parameter
     pg_stat_kcache.linux_hz is added.  By default, this parameter is discovered
     at server startup (Ronan Dunklau).
   - Fix issue when concurrently created entries for the same user, db and
     queryid could lost some execution counters (Mael Rimbault)
+  - Do not install docs anymore (Ronan Dunklau)
 
 ## 2.0.3 (2016-10-03)
   - Add PG 9.6 compatibility

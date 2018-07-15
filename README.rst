@@ -16,8 +16,9 @@ Installation
 Compiling
 ---------
 
-The module can be built using the standard PGXS infrastructure. For this to work, the
-``pg_config`` program must be available in your $PATH. Instruction to install follows::
+The module can be built using the standard PGXS infrastructure. For this to
+work, the ``pg_config`` program must be available in your $PATH. Instruction to
+install follows::
 
  git clone https://github.com/powa-team/pg_stat_kcache.git
  cd pg_stat_kcache
@@ -39,8 +40,8 @@ Add the following parameters into you ``postgresql.conf``::
  # postgresql.conf
  shared_preload_libraries = 'pg_stat_statements,pg_stat_kcache'
 
-Once your PostgreSQL cluster is restarted, you can install the extension in every
-database where you need to access the statistics::
+Once your PostgreSQL cluster is restarted, you can install the extension in
+every database where you need to access the statistics::
 
  mydb=# CREATE EXTENSION pg_stat_kcache;
 
@@ -57,17 +58,33 @@ pg_stat_kcache view
 +=============+===================+=====================================================+
 | datname     | name              | Name of the database                                |
 +-------------+-------------------+-----------------------------------------------------+
-| reads       | bigint            | Number of blocks read by the filesystem layer       |
-+-------------+-------------------+-----------------------------------------------------+
-| reads_blks  | bigint            | Number of 8K blocks read by the filesystem layer    |
-+-------------+-------------------+-----------------------------------------------------+
-| writes      | bigint            | Number of blocks written by the filesystem layer    |
-+-------------+-------------------+-----------------------------------------------------+
-| writes_blks | bigint            | Number of 8K blocks written by the filesystem layer |
-+-------------+-------------------+-----------------------------------------------------+
 | user_time   | double precision  | User CPU time used                                  |
 +-------------+-------------------+-----------------------------------------------------+
 | system_time | double precision  | System CPU time used                                |
++-------------+-------------------+-----------------------------------------------------+
+| minflts     | bigint            | Number of page reclaims (soft page faults)          |
++-------------+-------------------+-----------------------------------------------------+
+| majflts     | bigint            | Number of page faults (hard page faults)            |
++-------------+-------------------+-----------------------------------------------------+
+| nswaps      | bigint            | Number of swaps                                     |
++-------------+-------------------+-----------------------------------------------------+
+| reads       | bigint            | Number of bytes read by the filesystem layer        |
++-------------+-------------------+-----------------------------------------------------+
+| reads_blks  | bigint            | Number of 8K blocks read by the filesystem layer    |
++-------------+-------------------+-----------------------------------------------------+
+| writes      | bigint            | Number of butes written by the filesystem layer     |
++-------------+-------------------+-----------------------------------------------------+
+| writes_blks | bigint            | Number of 8K blocks written by the filesystem layer |
++-------------+-------------------+-----------------------------------------------------+
+| msgsnds     | bigint            | Number of IPC messages sent                         |
++-------------+-------------------+-----------------------------------------------------+
+| msgrcvs     | bigint            | Number of IPC messages received                     |
++-------------+-------------------+-----------------------------------------------------+
+| nsignals    | bigint            | Number of signals received                          |
++-------------+-------------------+-----------------------------------------------------+
+| nvcsws      | bigint            | Number of voluntary context switches                |
++-------------+-------------------+-----------------------------------------------------+
+| nivcsws     | bigint            | Number of involuntary context switches              |
 +-------------+-------------------+-----------------------------------------------------+
 
 pg_stat_kcache_detail view
@@ -82,6 +99,16 @@ pg_stat_kcache_detail view
 +-------------+-------------------+-----------------------------------------------------+
 | rolname     | name              | Role name                                           |
 +-------------+-------------------+-----------------------------------------------------+
+| user_time   | double precision  | User CPU time used                                  |
++-------------+-------------------+-----------------------------------------------------+
+| system_time | double precision  | System CPU time used                                |
++-------------+-------------------+-----------------------------------------------------+
+| minflts     | bigint            | Number of page reclaims (soft page faults)          |
++-------------+-------------------+-----------------------------------------------------+
+| majflts     | bigint            | Number of page faults (hard page faults)            |
++-------------+-------------------+-----------------------------------------------------+
+| nswaps      | bigint            | Number of swaps                                     |
++-------------+-------------------+-----------------------------------------------------+
 | reads       | bigint            | Number of bytes read by the filesystem layer        |
 +-------------+-------------------+-----------------------------------------------------+
 | reads_blks  | bigint            | Number of 8K blocks read by the filesystem layer    |
@@ -90,9 +117,15 @@ pg_stat_kcache_detail view
 +-------------+-------------------+-----------------------------------------------------+
 | writes_blks | bigint            | Number of 8K blocks written by the filesystem layer |
 +-------------+-------------------+-----------------------------------------------------+
-| user_time   | double precision  | User CPU time used                                  |
+| msgsnds     | bigint            | Number of IPC messages sent                         |
 +-------------+-------------------+-----------------------------------------------------+
-| system_time | double precision  | System CPU time used                                |
+| msgrcvs     | bigint            | Number of IPC messages received                     |
++-------------+-------------------+-----------------------------------------------------+
+| nsignals    | bigint            | Number of signals received                          |
++-------------+-------------------+-----------------------------------------------------+
+| nvcsws      | bigint            | Number of voluntary context switches                |
++-------------+-------------------+-----------------------------------------------------+
+| nivcsws     | bigint            | Number of involuntary context switches              |
 +-------------+-------------------+-----------------------------------------------------+
 
 pg_stat_kcache_reset function
@@ -123,13 +156,29 @@ It provides the following columns:
 +-------------+-------------------+--------------------------------------------------+
 | dbid        | oid               | Database OID                                     |
 +-------------+-------------------+--------------------------------------------------+
+| user_time   | double precision  | User CPU time used                               |
++-------------+-------------------+--------------------------------------------------+
+| system_time | double precision  | System CPU time use                              |
++-------------+-------------------+--------------------------------------------------+
+| minflts     | bigint            | Number of page reclaims (soft page faults)       |
++-------------+-------------------+--------------------------------------------------+
+| majflts     | bigint            | Number of page faults (hard page faults)         |
++-------------+-------------------+--------------------------------------------------+
+| nswaps      | bigint            | Number of swaps                                  |
++-------------+-------------------+--------------------------------------------------+
 | reads       | bigint            | Number of bytes read by the filesystem layer     |
 +-------------+-------------------+--------------------------------------------------+
 | writes      | bigint            | Number of bytes written by the filesystem layer  |
 +-------------+-------------------+--------------------------------------------------+
-| user_time   | double precision  | User CPU time used                               |
+| msgsnds     | bigint            | Number of IPC messages sent                      |
 +-------------+-------------------+--------------------------------------------------+
-| system_time | double precision  | System CPU time use                              |
+| msgrcvs     | bigint            | Number of IPC messages received                  |
++-------------+-------------------+--------------------------------------------------+
+| nsignals    | bigint            | Number of signals received                       |
++-------------+-------------------+--------------------------------------------------+
+| nvcsws      | bigint            | Number of voluntary context switches             |
++-------------+-------------------+--------------------------------------------------+
+| nivcsws     | bigint            | Number of involuntary context switches           |
 +-------------+-------------------+--------------------------------------------------+
 
 Bugs and limitations
@@ -142,15 +191,22 @@ be the case for another Unix implementation.
 
 See: http://lkml.indiana.edu/hypermail/linux/kernel/0703.2/0937.html
 
+On platforms without a native getrusage(2), all fields except `user_time` and
+`system_time` will be NULL.
+
+On platforms with a native getrusage(2), some of the fields may not be
+maintained.  This is a platform dependent behavior, please refer to your
+platform getrusage(2) manual page for more details.
+
 Authors
 =======
 
-pg_stat_kcache is an original development from Thomas Reiss, with large portions
-of code inspired from pg_stat_plans. Julien Rouhaud also contributed some parts of
-the extension.
+pg_stat_kcache is an original development from Thomas Reiss, with large
+portions of code inspired from pg_stat_plans. Julien Rouhaud also contributed
+some parts of the extension.
 
-Thanks goes to Peter Geoghegan for providing much inspiration with pg_stat_plans
-so we could write this extension quite straightforward.
+Thanks goes to Peter Geoghegan for providing much inspiration with
+pg_stat_plans so we could write this extension quite straightforward.
 
 License
 =======
