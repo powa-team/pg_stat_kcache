@@ -12,6 +12,7 @@ statistics will be reset.
   - Add a workaround for sampling problems with getrusage(), new parameter
     pg_stat_kcache.linux_hz is added.  By default, this parameter is discovered
     at server startup (Ronan Dunklau).
+  - Add compatibility with PostgreSQL 11 (Thomas Reiss)
   - Fix issue when concurrently created entries for the same user, db and
     queryid could lost some execution counters (Mael Rimbault)
   - Do not install docs anymore (Ronan Dunklau)
