@@ -1,4 +1,4 @@
-## 2.1.0 (WIP)
+## 2.1.0 (2018-07-17)
 
 **NOTE**: This version requires a change to the on-disk format.  After
 installing the new version restarting PostgreSQL, any previously accumulated
