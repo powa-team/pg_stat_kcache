@@ -1,0 +1,5 @@
+pg-stat-kcache (2.1.1-1) unstable; urgency=low
+
+  * Initial release.
+
+ -- Julien Rouhaud <rjuju123@gmail.com>  Sun, 22 Jul 2018 19:19:36 +0100

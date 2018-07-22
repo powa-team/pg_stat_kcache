@@ -9,6 +9,7 @@
 
   - Allow PG_CONFIG value to be found on command-line (edechaux)
   - Warn users about incorrect GUC (Julien Rouhaud)
+  - Add debian packaging (Julien Rouhaud)
 
 ## 2.1.0 (2018-07-17)
 
