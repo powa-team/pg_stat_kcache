@@ -4,3 +4,4 @@
   * Guillaume Lelarge
   * Jean-Sébastien Bacq
   * Maël Rimbault
+  * edechaux
