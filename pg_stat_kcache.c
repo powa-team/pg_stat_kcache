@@ -58,8 +58,8 @@ typedef uint32 pgsk_queryid;
 #define PG_STAT_KCACHE_COLS_V2_1	15
 #define PG_STAT_KCACHE_COLS			15	/* maximum of above */
 
+#define USAGE_INCREASE			(1.0)
 #define USAGE_DECREASE_FACTOR	(0.99)	/* decreased every pgsk_entry_dealloc */
-#define STICKY_DECREASE_FACTOR	(0.50)	/* factor for sticky entries */
 #define USAGE_DEALLOC_PERCENT	5		/* free this % of entries at once */
 #define USAGE_INIT				(1.0)	/* including initial planning */
 
@@ -92,7 +92,6 @@ static struct	rusage rusage_start;
 */
 typedef struct pgskCounters
 {
-	int64			calls;		/* # of times executed */
 	double			usage;		/* usage factor */
 	/* These fields are always used */
 	float8			utime;		/* CPU user time */
@@ -141,7 +140,6 @@ typedef struct pgskEntry
 typedef struct pgskSharedState
 {
 	LWLockId	lock;					/* protects hashtable search/modification */
-	double		cur_median_usage;		/* current median usage in hashtable */
 } pgskSharedState;
 
 
@@ -177,7 +175,7 @@ static void pgsk_shmem_startup(void);
 static void pgsk_shmem_shutdown(int code, Datum arg);
 static void pgsk_ExecutorStart(QueryDesc *queryDesc, int eflags);
 static void pgsk_ExecutorEnd(QueryDesc *queryDesc);
-static pgskEntry *pgsk_entry_alloc(pgskHashKey *key, bool sticky);
+static pgskEntry *pgsk_entry_alloc(pgskHashKey *key);
 static void pgsk_entry_dealloc(void);
 static void pgsk_entry_reset(void);
 static void pgsk_entry_store(pgsk_queryid queryId, pgskCounters counters);
@@ -352,11 +350,7 @@ pgsk_shmem_startup(void)
 		if (fread(&temp, sizeof(pgskEntry), 1, file) != 1)
 			goto error;
 
-		/* Skip loading "sticky" entries */
-		if (temp.counters.calls == 0)
-			continue;
-
-		entry = pgsk_entry_alloc(&temp.key, false);
+		entry = pgsk_entry_alloc(&temp.key);
 
 		/* copy in the actual stats */
 		entry->counters = temp.counters;
@@ -534,7 +528,7 @@ pgsk_entry_store(pgsk_queryid queryId, pgskCounters counters)
 		LWLockAcquire(pgsk->lock, LW_EXCLUSIVE);
 
 		/* OK to create a new hashtable entry */
-		entry = pgsk_entry_alloc(&key, false);
+		entry = pgsk_entry_alloc(&key);
 	}
 
 	/*
@@ -545,11 +539,8 @@ pgsk_entry_store(pgsk_queryid queryId, pgskCounters counters)
 
 	SpinLockAcquire(&e->mutex);
 
-	/* "Unstick" entry if it was previously sticky */
-	if (e->counters.calls == 0)
-		e->counters.usage = USAGE_INIT;
+	e->counters.usage += USAGE_INCREASE;
 
-	e->counters.calls += 1;
 	e->counters.utime += counters.utime;
 	e->counters.stime += counters.stime;
 #ifdef HAVE_GETRUSAGE
@@ -574,7 +565,7 @@ pgsk_entry_store(pgsk_queryid queryId, pgskCounters counters)
  * Allocate a new hashtable entry.
  * caller must hold an exclusive lock on pgsk->lock
  */
-static pgskEntry *pgsk_entry_alloc(pgskHashKey *key, bool sticky)
+static pgskEntry *pgsk_entry_alloc(pgskHashKey *key)
 {
 	pgskEntry  *entry;
 	bool		found;
@@ -593,7 +584,7 @@ static pgskEntry *pgsk_entry_alloc(pgskHashKey *key, bool sticky)
 		/* reset the statistics */
 		memset(&entry->counters, 0, sizeof(pgskCounters));
 		/* set the appropriate initial usage count */
-		entry->counters.usage = sticky ? pgsk->cur_median_usage : USAGE_INIT;
+		entry->counters.usage = USAGE_INIT;
 		/* re-initialize the mutex each time ... we assume no one using it */
 		SpinLockInit(&entry->mutex);
 	}
@@ -643,20 +634,10 @@ pgsk_entry_dealloc(void)
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
 		entries[i++] = entry;
-		/* "Sticky" entries get a different usage decay rate. */
-		if (entry->counters.calls == 0)
-			entry->counters.usage *= STICKY_DECREASE_FACTOR;
-		else
-			entry->counters.usage *= USAGE_DECREASE_FACTOR;
+		entry->counters.usage *= USAGE_DECREASE_FACTOR;
 	}
 
 	qsort(entries, i, sizeof(pgskEntry *), entry_cmp);
-
-	if (i > 0)
-	{
-		/* Record the (approximate) median usage */
-		pgsk->cur_median_usage = entries[i / 2]->counters.usage;
-	}
 
 	nvictims = Max(10, i * USAGE_DEALLOC_PERCENT / 100);
 	nvictims = Min(nvictims, i);
@@ -886,10 +867,6 @@ pg_stat_kcache_internal(FunctionCallInfo fcinfo, pgskVersion api_version)
 			tmp = e->counters;
 			SpinLockRelease(&e->mutex);
 		}
-
-		/* Skip entry if unexecuted (ie, it's a pending "sticky" entry) */
-		if ( tmp.calls == 0)
-			continue;
 
 		values[i++] = Int64GetDatum(entry->key.queryid);
 		values[i++] = ObjectIdGetDatum(entry->key.userid);
