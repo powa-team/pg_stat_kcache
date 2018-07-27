@@ -195,11 +195,12 @@ _PG_init(void)
 		elog(ERROR, "This module can only be loaded via shared_preload_libraries");
 		return;
 	}
+
 	DefineCustomIntVariable("pg_stat_kcache.linux_hz",
 				"Inform pg_stat_kcache of the linux CONFIG_HZ config option",
-		  "This is used by pg_stat_kcache to compensate for sampling errors "
-							"in getrusage due to the kernel adhering to its ticks. The default value, -1, "
-							"tries to guess it at startup. ",
+				"This is used by pg_stat_kcache to compensate for sampling errors "
+				"in getrusage due to the kernel adhering to its ticks. The default value, -1, "
+				"tries to guess it at startup. ",
 							&pgsk_linux_hz,
 							-1,
 							-1,
@@ -209,6 +210,8 @@ _PG_init(void)
 							pgsk_assign_linux_hz_check_hook,
 							NULL,
 							NULL);
+
+	EmitWarningsOnPlaceholders("pg_stat_kcache");
 
 	/* set pgsk_max if needed */
 	pgsk_setmax();
