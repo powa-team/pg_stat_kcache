@@ -1,3 +1,15 @@
+## 2.1.1 (2018-06-28)
+
+**Bugfix**:
+
+  - Fix usage increase, used to keep the most frequent entries in memory
+    (Julien Rouhaud)
+
+**Miscellaneous**:
+
+  - Allow PG_CONFIG value to be found on command-line (edechaux)
+  - Warn users about incorrect GUC (Julien Rouhaud)
+
 ## 2.1.0 (2018-07-17)
 
 **NOTE**: This version requires a change to the on-disk format.  After

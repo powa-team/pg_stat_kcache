@@ -5,15 +5,10 @@
 -- Copyright (c) 2018, The PoWA-team
 
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
-\echo Use "ALTER EXTENSION pg_stat_kcache" to load this file. \quit
+\echo Use "CREATE EXTENSION pg_stat_kcache" to load this file. \quit
 
 SET client_encoding = 'UTF8';
 
--- Drop objects depending on pg_stat_kcache()
-DROP VIEW pg_stat_kcache;
-DROP VIEW pg_stat_kcache_detail;
--- pg_stat_kcache() paremeters differ, we need to drop and create it
-DROP FUNCTION pg_stat_kcache();
 CREATE FUNCTION pg_stat_kcache(
     OUT queryid bigint,
     OUT userid      oid,
@@ -27,7 +22,7 @@ CREATE FUNCTION pg_stat_kcache(
     OUT nswaps      bigint,             /* total swaps */
     OUT msgsnds     bigint,             /* total IPC messages sent */
     OUT msgrcvs     bigint,             /* total IPC messages received */
-    OUT nsignals    bigint,             /* total sginal received */
+    OUT nsignals    bigint,             /* total signals received */
     OUT nvcsws      bigint,             /* total voluntary context switches */
     OUT nivcsws     bigint              /* total involuntary context switches */
 )
@@ -35,6 +30,12 @@ RETURNS SETOF record
 LANGUAGE c COST 1000
 AS '$libdir/pg_stat_kcache', 'pg_stat_kcache_2_1';
 GRANT ALL ON FUNCTION pg_stat_kcache() TO public;
+
+CREATE FUNCTION pg_stat_kcache_reset()
+    RETURNS void
+    LANGUAGE c COST 1000
+    AS '$libdir/pg_stat_kcache', 'pg_stat_kcache_reset';
+REVOKE ALL ON FUNCTION pg_stat_kcache_reset() FROM public;
 
 CREATE VIEW pg_stat_kcache_detail AS
 SELECT s.query, d.datname, r.rolname,
