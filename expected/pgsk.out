@@ -13,16 +13,16 @@ SELECT count(*) FROM pg_stat_kcache WHERE datname = current_database();
      1
 (1 row)
 
-SELECT count(*) FROM pg_stat_kcache_detail WHERE datname = current_database() AND query = 'SELECT $1 AS dummy';
+SELECT count(*) FROM pg_stat_kcache_detail WHERE datname = current_database() AND (query = 'SELECT $1 AS dummy' OR query = 'SELECT ? AS dummy;');
  count 
 -------
      1
 (1 row)
 
-SELECT query, reads, reads_blks, writes, writes_blks FROM pg_stat_kcache_detail WHERE datname = current_database() AND query = 'SELECT $1 AS dummy';
-       query        | reads | reads_blks | writes | writes_blks 
---------------------+-------+------------+--------+-------------
- SELECT $1 AS dummy |     0 |          0 |      0 |           0
+SELECT reads, reads_blks, writes, writes_blks FROM pg_stat_kcache_detail WHERE datname = current_database() AND (query = 'SELECT $1 AS dummy' OR query = 'SELECT ? AS dummy;');
+ reads | reads_blks | writes | writes_blks 
+-------+------------+--------+-------------
+     0 |          0 |      0 |           0
 (1 row)
 
 -- dummy table
@@ -34,7 +34,7 @@ SELECT count(*) FROM test;
   1000
 (1 row)
 
-SELECT user_time + system_time > 0 AS cpu_time_ok FROM pg_stat_kcache_detail WHERE datname = current_database() AND query = 'SELECT count(*) FROM test';
+SELECT user_time + system_time > 0 AS cpu_time_ok FROM pg_stat_kcache_detail WHERE datname = current_database() AND query LIKE 'SELECT count(*) FROM test%';
  cpu_time_ok 
 -------------
  t
