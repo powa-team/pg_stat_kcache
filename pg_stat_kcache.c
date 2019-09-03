@@ -89,6 +89,12 @@ static struct	rusage rusage_start;
  *
  * For platform without getrusage support, we rely on postgres implementation
  * defined in rusagestub.h, which only supports user and system time.
+ *
+ * Note that the following counters are not maintained on GNU/Linux:
+ *   - ru_nswap
+ *   - ru_msgsnd
+ *   - ru_msgrcv
+ *   - ru_nsignals
 */
 typedef struct pgskCounters
 {
