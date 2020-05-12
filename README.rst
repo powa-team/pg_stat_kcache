@@ -72,7 +72,7 @@ pg_stat_kcache view
 +-------------+-------------------+-------------------------------------------------------------+
 | reads_blks  | bigint            | Number of 8K blocks read by the filesystem layer            |
 +-------------+-------------------+-------------------------------------------------------------+
-| writes      | bigint            | Number of butes written by the filesystem layer             |
+| writes      | bigint            | Number of bytes written by the filesystem layer             |
 +-------------+-------------------+-------------------------------------------------------------+
 | writes_blks | bigint            | Number of 8K blocks written by the filesystem layer         |
 +-------------+-------------------+-------------------------------------------------------------+
