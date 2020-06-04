@@ -6,3 +6,4 @@
   * Maël Rimbault
   * edechaux
   * Felix Geisendörfer
+  * github user atorik

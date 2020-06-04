@@ -27,10 +27,16 @@
 #endif
 
 #include "access/hash.h"
+#if PG_VERSION_NUM >= 90600
+#include "access/parallel.h"
+#endif
 #include "executor/executor.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "pgstat.h"
+#if PG_VERSION_NUM >= 90600
+#include "postmaster/autovacuum.h"
+#endif
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/spin.h"
@@ -145,7 +151,12 @@ typedef struct pgskEntry
  */
 typedef struct pgskSharedState
 {
-	LWLockId	lock;					/* protects hashtable search/modification */
+	LWLock	   *lock;					/* protects hashtable search/modification */
+#if PG_VERSION_NUM >= 90600
+	LWLock	   *queryids_lock;			/* protects queryids array */
+	pgsk_queryid	queryids[FLEXIBLE_ARRAY_MEMBER]; /* queryid info for
+														parallel leaders */
+#endif
 } pgskSharedState;
 
 
@@ -190,6 +201,10 @@ static int	pgsk_match_fn(const void *key1, const void *key2, Size keysize);
 
 
 static bool pgsk_assign_linux_hz_check_hook(int *newval, void **extra, GucSource source);
+#if PG_VERSION_NUM >= 90600
+static Size pgsk_queryids_array_size(void);
+static void pgsk_set_queryid(pgsk_queryid queryid);
+#endif
 
 static int	pgsk_linux_hz;
 
@@ -223,7 +238,7 @@ _PG_init(void)
 	pgsk_setmax();
 	RequestAddinShmemSpace(pgsk_memsize());
 #if PG_VERSION_NUM >= 90600
-	RequestNamedLWLockTranche("pg_stat_kcache", 1);
+	RequestNamedLWLockTranche("pg_stat_kcache", 2);
 #else
 	RequestAddinLWLocks(1);
 #endif
@@ -271,6 +286,18 @@ pgsk_assign_linux_hz_check_hook(int *newval, void **extra, GucSource source)
 	return true;
 }
 
+#if PG_VERSION_NUM >= 90600
+static void
+pgsk_set_queryid(pgsk_queryid queryid)
+{
+	/* Only the leader knows the queryid. */
+	Assert(!IsParallelWorker());
+
+	LWLockAcquire(pgsk->queryids_lock, LW_EXCLUSIVE);
+	pgsk->queryids[MyBackendId] = queryid;
+	LWLockRelease(pgsk->queryids_lock);
+}
+#endif
 
 static void
 pgsk_shmem_startup(void)
@@ -301,7 +328,9 @@ pgsk_shmem_startup(void)
 	{
 		/* First time through ... */
 #if PG_VERSION_NUM >= 90600
-		pgsk->lock = &(GetNamedLWLockTranche("pg_stat_kcache"))->lock;
+		LWLockPadded *locks = GetNamedLWLockTranche("pg_stat_kcache");
+		pgsk->lock = &(locks[0]).lock;
+		pgsk->queryids_lock = &(locks[1]).lock;
 #else
 		pgsk->lock = LWLockAssign();
 #endif
@@ -498,9 +527,27 @@ static Size pgsk_memsize(void)
 
 	size = MAXALIGN(sizeof(pgskSharedState));
 	size = add_size(size, hash_estimate_size(pgsk_max, sizeof(pgskEntry)));
+#if PG_VERSION_NUM >= 90600
+	size = add_size(size, MAXALIGN(pgsk_queryids_array_size()));
+#endif
 
 	return size;
 }
+
+#if PG_VERSION_NUM >= 90600
+static Size
+pgsk_queryids_array_size(void)
+{
+	/*
+	 * queryid isn't pushed to parallel workers.  We store them in shared mem
+	 * for each query, identified by their BackendId.  If need room for all
+	 * possible backends, plus autovacuum launcher and workers, plus bg workers
+	 * and an extra one since BackendId numerotation starts at 1.
+	 */
+	return (sizeof(bool) * (MaxConnections + autovacuum_max_workers + 1
+							+ max_worker_processes + 1));
+}
+#endif
 
 
 /*
@@ -685,6 +732,14 @@ pgsk_ExecutorStart (QueryDesc *queryDesc, int eflags)
 	/* capture kernel usage stats in rusage_start */
 	getrusage(RUSAGE_SELF, &rusage_start);
 
+#if PG_VERSION_NUM >= 90600
+	/* Save the queryid so parallel worker can retrieve it */
+	if (!IsParallelWorker())
+	{
+		pgsk_set_queryid(queryDesc->plannedstmt->queryId);
+	}
+#endif
+
 	/* give control back to PostgreSQL */
 	if (prev_ExecutorStart)
 		prev_ExecutorStart(queryDesc, eflags);
@@ -702,6 +757,15 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 	/* capture kernel usage stats in rusage_end */
 	getrusage(RUSAGE_SELF, &rusage_end);
 
+#if PG_VERSION_NUM >= 90600
+	if (IsParallelWorker())
+	{
+		LWLockAcquire(pgsk->queryids_lock, LW_SHARED);
+		queryId = pgsk->queryids[ParallelMasterBackendId];
+		LWLockRelease(pgsk->queryids_lock);
+	}
+	else
+#endif
 	queryId = queryDesc->plannedstmt->queryId;
 
 	/* Compute CPU time delta */
