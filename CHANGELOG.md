@@ -1,3 +1,10 @@
+## 2.1.2 (2020-07-08)
+
+**Bugfix**:
+
+  - Accumulate counters for parallel workers too (Julien Rouhaud, thanks to
+    Atsushi Torikoshi for the report)
+
 ## 2.1.1 (2018-07-28)
 
 **Bugfix**:
