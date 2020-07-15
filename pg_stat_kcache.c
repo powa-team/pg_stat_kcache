@@ -321,7 +321,11 @@ pgsk_shmem_startup(void)
 
 	/* global access lock */
 	pgsk = ShmemInitStruct("pg_stat_kcache",
-					sizeof(pgskSharedState),
+					(sizeof(pgskSharedState)
+#if PG_VERSION_NUM >= 90600
+					 + pgsk_queryids_array_size()
+#endif
+					),
 					&found);
 
 	if (!found)
