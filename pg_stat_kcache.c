@@ -544,7 +544,7 @@ pgsk_queryids_array_size(void)
 	 * possible backends, plus autovacuum launcher and workers, plus bg workers
 	 * and an extra one since BackendId numerotation starts at 1.
 	 */
-	return (sizeof(bool) * (MaxConnections + autovacuum_max_workers + 1
+	return (sizeof(pgsk_queryid) * (MaxConnections + autovacuum_max_workers + 1
 							+ max_worker_processes + 1));
 }
 #endif
