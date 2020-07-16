@@ -1,3 +1,11 @@
+## 2.1.3 (2020-07-16)
+
+**Bugfix**:
+
+  - Fix memory corruption introduced in v2.1.2 that can cause a PostgreSQL
+    crash (Julien Rouhaud, thanks to github user tbe, Nikolay Samokhvalov and
+    Andreas Seltenreich for reporting the issue and the extensive checking)
+
 ## 2.1.2 (2020-07-08)
 
 **Bugfix**:
