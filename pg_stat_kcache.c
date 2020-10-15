@@ -77,6 +77,10 @@ typedef uint32 pgsk_queryid;
 #define TIMEVAL_DIFF(start, end) ((double) end.tv_sec + (double) end.tv_usec / 1000000.0) \
 	- ((double) start.tv_sec + (double) start.tv_usec / 1000000.0)
 
+#if PG_VERSION_NUM < 140000
+#define ParallelLeaderBackendId ParallelMasterBackendId
+#endif
+
 /*
  * Extension version number, for supporting older extension versions' objects
  */
@@ -765,7 +769,7 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 	if (IsParallelWorker())
 	{
 		LWLockAcquire(pgsk->queryids_lock, LW_SHARED);
-		queryId = pgsk->queryids[ParallelMasterBackendId];
+		queryId = pgsk->queryids[ParallelLeaderBackendId];
 		LWLockRelease(pgsk->queryids_lock);
 	}
 	else
