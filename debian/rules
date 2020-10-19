@@ -3,26 +3,15 @@
 PKGVER = $(shell dpkg-parsechangelog | awk -F '[:-]' '/^Version:/ { print substr($$2, 2) }')
 EXCLUDE = --exclude-vcs --exclude=debian
 
-include /usr/share/postgresql-common/pgxs_debian_control.mk
-
-override_dh_auto_build:
-	# do nothing
-
-override_dh_auto_test:
-	# nothing to do here, upstream tests used, see debian/tests/*
-
-override_dh_auto_install:
-	# build all supported versions
-	+pg_buildext loop postgresql-%v-pg-stat-kcache
-
 override_dh_installdocs:
 	dh_installdocs --all CONTRIBUTORS.md README.rst
 	rm -rvf debian/*/usr/share/doc/postgresql-doc-*
 
-override_dh_installchangelogs:
-	dh_installchangelogs CHANGELOG.md upstream
+override_dh_pgxs_test:
+	pg_buildext -o "shared_preload_libraries=pg_stat_statements,pg_stat_kcache" installcheck . . postgresql-%v-pg-stat-kcache
 
 orig: debian/control clean
 	cd .. && tar czf pg-stat-kcache_$(PKGVER).orig.tar.gz $(EXCLUDE) pg-stat-kcache-$(PKGVER)
+
 %:
-	dh $@
+	dh $@ --with pgxs_loop

@@ -2,16 +2,17 @@ Source: pg-stat-kcache
 Section: database
 Priority: optional
 Maintainer: Julien Rouhaud <rjuju123@gmail.com>
-Standards-Version: 4.1.3
-Build-Depends: debhelper (>=9~), postgresql-server-dev-all (>= 141~)
+Standards-Version: 4.5.0
+Rules-Requires-Root: no
+Build-Depends: debhelper-compat (= 13), postgresql-all (>= 217~)
 Homepage: https://powa.readthedocs.io/
 Vcs-Browser: https://github.com/powa-team/pg_stat_kcache
 Vcs-Git: https://github.com/powa-team/pg_stat_kcache.git
 
-Package: postgresql-12-pg-stat-kcache
+Package: postgresql-13-pg-stat-kcache
 Architecture: any
-Depends: ${misc:Depends}, ${shlibs:Depends}, postgresql-12,
- postgresql-contrib-12
+Depends: ${misc:Depends}, ${shlibs:Depends}, postgresql-13,
+ postgresql-contrib-13
 Description: PostgreSQL extension to gather per-query kernel statistics.
  Statistics gathered are reads and writes done out of the operating system
  cache, user and system CPU usage, context switches and all the other
