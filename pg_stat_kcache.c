@@ -116,7 +116,7 @@ typedef struct pgskCounters
 	/* These fields are only used for platform with HAVE_GETRUSAGE defined */
 	int64			minflts;	/* page reclaims (soft page faults) */
 	int64			majflts;	/* page faults (hard page faults) */
-	int64			nswaps;		/* page faults (hard page faults) */
+	int64			nswaps;		/* swaps */
 	int64			reads;		/* Physical block reads */
 	int64			writes;		/* Physical block writes */
 	int64			msgsnds;	/* IPC messages sent */
