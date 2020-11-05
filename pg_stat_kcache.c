@@ -163,15 +163,45 @@ typedef struct pgskSharedState
 #endif
 } pgskSharedState;
 
+/*---- Local variables ----*/
+
+/* Current nesting depth of ExecutorRun+ProcessUtility calls */
+static int	exec_nested_level = 0;
+
 
 /* saved hook address in case of unload */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 static ExecutorStart_hook_type prev_ExecutorStart = NULL;
+static ExecutorRun_hook_type prev_ExecutorRun = NULL;
+static ExecutorFinish_hook_type prev_ExecutorFinish = NULL;
 static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
 
 /* Links to shared memory state */
 static pgskSharedState *pgsk = NULL;
 static HTAB *pgsk_hash = NULL;
+
+/*---- GUC variables ----*/
+
+typedef enum
+{
+	PGSK_TRACK_NONE,			/* track no statements */
+	PGSK_TRACK_TOP,				/* only top level statements */
+	PGSK_TRACK_ALL				/* all statements, including nested ones */
+}			PGSKTrackLevel;
+
+static const struct config_enum_entry pgs_track_options[] =
+{
+	{"none", PGSK_TRACK_NONE, false},
+	{"top", PGSK_TRACK_TOP, false},
+	{"all", PGSK_TRACK_ALL, false},
+	{NULL, 0, false}
+};
+
+static int	pgsk_track;			/* tracking level */
+
+#define pgsk_enabled(level) \
+	((pgsk_track == PGSK_TRACK_ALL && (level) < PGSK_MAX_NESTED_LEVEL) || \
+	(pgsk_track == PGSK_TRACK_TOP && (level) == 0))
 
 /*--- Functions --- */
 
@@ -195,6 +225,18 @@ static Size pgsk_memsize(void);
 static void pgsk_shmem_startup(void);
 static void pgsk_shmem_shutdown(int code, Datum arg);
 static void pgsk_ExecutorStart(QueryDesc *queryDesc, int eflags);
+static void pgsk_ExecutorRun(QueryDesc *queryDesc,
+				 ScanDirection direction,
+#if PG_VERSION_NUM >= 90600
+				 uint64 count
+#else
+				 long count
+#endif
+#if PG_VERSION_NUM >= 100000
+				 , bool execute_once
+#endif
+);
+static void pgsk_ExecutorFinish(QueryDesc *queryDesc);
 static void pgsk_ExecutorEnd(QueryDesc *queryDesc);
 static pgskEntry *pgsk_entry_alloc(pgskHashKey *key);
 static void pgsk_entry_dealloc(void);
@@ -236,6 +278,18 @@ _PG_init(void)
 							NULL,
 							NULL);
 
+	DefineCustomEnumVariable("pg_stat_kcache.track",
+							 "Selects which statements are tracked by pg_stat_kcache.",
+							 NULL,
+							 &pgsk_track,
+							 PGSK_TRACK_TOP,
+							 pgs_track_options,
+							 PGC_SUSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
 	EmitWarningsOnPlaceholders("pg_stat_kcache");
 
 	/* set pgsk_max if needed */
@@ -252,6 +306,10 @@ _PG_init(void)
 	shmem_startup_hook = pgsk_shmem_startup;
 	prev_ExecutorStart = ExecutorStart_hook;
 	ExecutorStart_hook = pgsk_ExecutorStart;
+	prev_ExecutorRun = ExecutorRun_hook;
+	ExecutorRun_hook = pgsk_ExecutorRun;
+	prev_ExecutorFinish = ExecutorFinish_hook;
+	ExecutorFinish_hook = pgsk_ExecutorFinish;
 	prev_ExecutorEnd = ExecutorEnd_hook;
 	ExecutorEnd_hook = pgsk_ExecutorEnd;
 }
@@ -261,6 +319,8 @@ _PG_fini(void)
 {
 	/* uninstall hook */
 	ExecutorStart_hook = prev_ExecutorStart;
+	ExecutorRun_hook = prev_ExecutorRun;
+	ExecutorFinish_hook = prev_ExecutorFinish;
 	ExecutorEnd_hook = prev_ExecutorEnd;
 	shmem_startup_hook = prev_shmem_startup_hook;
 }
@@ -737,22 +797,89 @@ static void pgsk_entry_reset(void)
 static void
 pgsk_ExecutorStart (QueryDesc *queryDesc, int eflags)
 {
-	/* capture kernel usage stats in rusage_start */
-	getrusage(RUSAGE_SELF, &rusage_start);
+	if (pgsk_enabled(exec_nested_level))
+	{
+		/* capture kernel usage stats in rusage_start */
+		getrusage(RUSAGE_SELF, &rusage_start);
 
 #if PG_VERSION_NUM >= 90600
-	/* Save the queryid so parallel worker can retrieve it */
-	if (!IsParallelWorker())
-	{
-		pgsk_set_queryid(queryDesc->plannedstmt->queryId);
-	}
+		/* Save the queryid so parallel worker can retrieve it */
+		if (!IsParallelWorker())
+		{
+			pgsk_set_queryid(queryDesc->plannedstmt->queryId);
+		}
 #endif
+	}
 
 	/* give control back to PostgreSQL */
 	if (prev_ExecutorStart)
 		prev_ExecutorStart(queryDesc, eflags);
 	else
 		standard_ExecutorStart(queryDesc, eflags);
+}
+
+/*
+ * ExecutorRun hook: all we need do is track nesting depth
+ */
+static void
+pgsk_ExecutorRun(QueryDesc *queryDesc,
+				 ScanDirection direction,
+#if PG_VERSION_NUM >= 90600
+				 uint64 count
+#else
+				 long count
+#endif
+#if PG_VERSION_NUM >= 100000
+				 ,bool execute_once
+#endif
+)
+{
+	exec_nested_level++;
+	PG_TRY();
+	{
+		if (prev_ExecutorRun)
+#if PG_VERSION_NUM >= 100000
+			prev_ExecutorRun(queryDesc, direction, count, execute_once);
+#else
+			prev_ExecutorRun(queryDesc, direction, count);
+#endif
+		else
+#if PG_VERSION_NUM >= 100000
+			standard_ExecutorRun(queryDesc, direction, count, execute_once);
+#else
+			standard_ExecutorRun(queryDesc, direction, count);
+#endif
+		exec_nested_level--;
+	}
+	PG_CATCH();
+	{
+		exec_nested_level--;
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
+}
+
+/*
+ * ExecutorFinish hook: all we need do is track nesting depth
+ */
+static void
+pgsk_ExecutorFinish(QueryDesc *queryDesc)
+{
+	exec_nested_level++;
+	PG_TRY();
+	{
+		if (prev_ExecutorFinish)
+			prev_ExecutorFinish(queryDesc);
+		else
+			standard_ExecutorFinish(queryDesc);
+		exec_nested_level--;
+	}
+	PG_CATCH();
+	{
+		exec_nested_level--;
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
 }
 
 static void
@@ -762,63 +889,65 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 	struct rusage rusage_end;
 	pgskCounters counters;
 
-	/* capture kernel usage stats in rusage_end */
-	getrusage(RUSAGE_SELF, &rusage_end);
+	if (pgsk_enabled(exec_nested_level))
+	{
+		/* capture kernel usage stats in rusage_end */
+		getrusage(RUSAGE_SELF, &rusage_end);
 
 #if PG_VERSION_NUM >= 90600
-	if (IsParallelWorker())
-	{
-		LWLockAcquire(pgsk->queryids_lock, LW_SHARED);
-		queryId = pgsk->queryids[ParallelLeaderBackendId];
-		LWLockRelease(pgsk->queryids_lock);
-	}
-	else
-#endif
-	queryId = queryDesc->plannedstmt->queryId;
-
-	/* Compute CPU time delta */
-	counters.utime = TIMEVAL_DIFF(rusage_start.ru_utime, rusage_end.ru_utime);
-	counters.stime = TIMEVAL_DIFF(rusage_start.ru_stime, rusage_end.ru_stime);
-
-	if (queryDesc->totaltime)
-	{
-		/* Make sure stats accumulation is done */
-		InstrEndLoop(queryDesc->totaltime);
-
-		/*
-		 * We only consider values greater than 3 * linux tick, otherwise the
-		 * bias is too big
-		 */
-		if (queryDesc->totaltime->total < (3. / pgsk_linux_hz))
+		if (IsParallelWorker())
 		{
-			counters.stime = 0;
-			counters.utime = queryDesc->totaltime->total;
+			LWLockAcquire(pgsk->queryids_lock, LW_SHARED);
+			queryId = pgsk->queryids[ParallelLeaderBackendId];
+			LWLockRelease(pgsk->queryids_lock);
 		}
-	}
+		else
+#endif
+		queryId = queryDesc->plannedstmt->queryId;
+
+		/* Compute CPU time delta */
+		counters.utime = TIMEVAL_DIFF(rusage_start.ru_utime, rusage_end.ru_utime);
+		counters.stime = TIMEVAL_DIFF(rusage_start.ru_stime, rusage_end.ru_stime);
+
+		if (queryDesc->totaltime)
+		{
+			/* Make sure stats accumulation is done */
+			InstrEndLoop(queryDesc->totaltime);
+
+			/*
+			 * We only consider values greater than 3 * linux tick, otherwise the
+			 * bias is too big
+			 */
+			if (queryDesc->totaltime->total < (3. / pgsk_linux_hz))
+			{
+				counters.stime = 0;
+				counters.utime = queryDesc->totaltime->total;
+			}
+		}
 
 #ifdef HAVE_GETRUSAGE
-	/* Compute the rest of the counters */
-	counters.minflts = rusage_end.ru_minflt - rusage_start.ru_minflt;
-	counters.majflts = rusage_end.ru_majflt - rusage_start.ru_majflt;
-	counters.nswaps = rusage_end.ru_nswap - rusage_start.ru_nswap;
-	counters.reads = rusage_end.ru_inblock - rusage_start.ru_inblock;
-	counters.writes = rusage_end.ru_oublock - rusage_start.ru_oublock;
-	counters.msgsnds = rusage_end.ru_msgsnd - rusage_start.ru_msgsnd;
-	counters.msgrcvs = rusage_end.ru_msgrcv - rusage_start.ru_msgrcv;
-	counters.nsignals = rusage_end.ru_nsignals - rusage_start.ru_nsignals;
-	counters.nvcsws = rusage_end.ru_nvcsw - rusage_start.ru_nvcsw;
-	counters.nivcsws = rusage_end.ru_nivcsw - rusage_start.ru_nivcsw;
+		/* Compute the rest of the counters */
+		counters.minflts = rusage_end.ru_minflt - rusage_start.ru_minflt;
+		counters.majflts = rusage_end.ru_majflt - rusage_start.ru_majflt;
+		counters.nswaps = rusage_end.ru_nswap - rusage_start.ru_nswap;
+		counters.reads = rusage_end.ru_inblock - rusage_start.ru_inblock;
+		counters.writes = rusage_end.ru_oublock - rusage_start.ru_oublock;
+		counters.msgsnds = rusage_end.ru_msgsnd - rusage_start.ru_msgsnd;
+		counters.msgrcvs = rusage_end.ru_msgrcv - rusage_start.ru_msgrcv;
+		counters.nsignals = rusage_end.ru_nsignals - rusage_start.ru_nsignals;
+		counters.nvcsws = rusage_end.ru_nvcsw - rusage_start.ru_nvcsw;
+		counters.nivcsws = rusage_end.ru_nivcsw - rusage_start.ru_nivcsw;
 #endif
 
-	/* store current number of block reads and writes */
-	pgsk_entry_store(queryId, counters);
+		/* store current number of block reads and writes */
+		pgsk_entry_store(queryId, counters);
+	}
 
 	/* give control back to PostgreSQL */
 	if (prev_ExecutorEnd)
 		prev_ExecutorEnd(queryDesc);
 	else
 		standard_ExecutorEnd(queryDesc);
-
 }
 
 /*
