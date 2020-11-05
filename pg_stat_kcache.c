@@ -81,6 +81,8 @@ typedef uint32 pgsk_queryid;
 #define ParallelLeaderBackendId ParallelMasterBackendId
 #endif
 
+#define PGSK_MAX_NESTED_LEVEL		64
+
 /*
  * Extension version number, for supporting older extension versions' objects
  */
@@ -92,7 +94,7 @@ typedef enum pgskVersion
 
 static const uint32 PGSK_FILE_HEADER = 0x0d756e10;
 
-static struct	rusage rusage_start;
+static struct	rusage exec_rusage_start[PGSK_MAX_NESTED_LEVEL];
 
 /*
  * Current getrusage counters.
@@ -799,8 +801,10 @@ pgsk_ExecutorStart (QueryDesc *queryDesc, int eflags)
 {
 	if (pgsk_enabled(exec_nested_level))
 	{
+		struct rusage *rusage_start = &exec_rusage_start[exec_nested_level];
+
 		/* capture kernel usage stats in rusage_start */
-		getrusage(RUSAGE_SELF, &rusage_start);
+		getrusage(RUSAGE_SELF, rusage_start);
 
 #if PG_VERSION_NUM >= 90600
 		/* Save the queryid so parallel worker can retrieve it */
@@ -891,6 +895,8 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 
 	if (pgsk_enabled(exec_nested_level))
 	{
+		struct rusage *rusage_start = &exec_rusage_start[exec_nested_level];
+
 		/* capture kernel usage stats in rusage_end */
 		getrusage(RUSAGE_SELF, &rusage_end);
 
@@ -906,8 +912,8 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 		queryId = queryDesc->plannedstmt->queryId;
 
 		/* Compute CPU time delta */
-		counters.utime = TIMEVAL_DIFF(rusage_start.ru_utime, rusage_end.ru_utime);
-		counters.stime = TIMEVAL_DIFF(rusage_start.ru_stime, rusage_end.ru_stime);
+		counters.utime = TIMEVAL_DIFF(rusage_start->ru_utime, rusage_end.ru_utime);
+		counters.stime = TIMEVAL_DIFF(rusage_start->ru_stime, rusage_end.ru_stime);
 
 		if (queryDesc->totaltime)
 		{
@@ -927,16 +933,16 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 
 #ifdef HAVE_GETRUSAGE
 		/* Compute the rest of the counters */
-		counters.minflts = rusage_end.ru_minflt - rusage_start.ru_minflt;
-		counters.majflts = rusage_end.ru_majflt - rusage_start.ru_majflt;
-		counters.nswaps = rusage_end.ru_nswap - rusage_start.ru_nswap;
-		counters.reads = rusage_end.ru_inblock - rusage_start.ru_inblock;
-		counters.writes = rusage_end.ru_oublock - rusage_start.ru_oublock;
-		counters.msgsnds = rusage_end.ru_msgsnd - rusage_start.ru_msgsnd;
-		counters.msgrcvs = rusage_end.ru_msgrcv - rusage_start.ru_msgrcv;
-		counters.nsignals = rusage_end.ru_nsignals - rusage_start.ru_nsignals;
-		counters.nvcsws = rusage_end.ru_nvcsw - rusage_start.ru_nvcsw;
-		counters.nivcsws = rusage_end.ru_nivcsw - rusage_start.ru_nivcsw;
+		counters.minflts = rusage_end.ru_minflt - rusage_start->ru_minflt;
+		counters.majflts = rusage_end.ru_majflt - rusage_start->ru_majflt;
+		counters.nswaps = rusage_end.ru_nswap - rusage_start->ru_nswap;
+		counters.reads = rusage_end.ru_inblock - rusage_start->ru_inblock;
+		counters.writes = rusage_end.ru_oublock - rusage_start->ru_oublock;
+		counters.msgsnds = rusage_end.ru_msgsnd - rusage_start->ru_msgsnd;
+		counters.msgrcvs = rusage_end.ru_msgrcv - rusage_start->ru_msgrcv;
+		counters.nsignals = rusage_end.ru_nsignals - rusage_start->ru_nsignals;
+		counters.nvcsws = rusage_end.ru_nvcsw - rusage_start->ru_nvcsw;
+		counters.nivcsws = rusage_end.ru_nivcsw - rusage_start->ru_nivcsw;
 #endif
 
 		/* store current number of block reads and writes */
