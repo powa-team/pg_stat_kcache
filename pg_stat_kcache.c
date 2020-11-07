@@ -1,4 +1,4 @@
-/*----------------
+/*---------------
  * pg_stat_kcache
  *
  * Provides basic statistics about real I/O done by the filesystem layer.
@@ -33,6 +33,7 @@
 #include "executor/executor.h"
 #include "funcapi.h"
 #include "miscadmin.h"
+#include "optimizer/planner.h"
 #include "pgstat.h"
 #if PG_VERSION_NUM >= 90600
 #include "postmaster/autovacuum.h"
@@ -62,7 +63,8 @@ typedef uint32 pgsk_queryid;
 
 #define PG_STAT_KCACHE_COLS_V2_0	7
 #define PG_STAT_KCACHE_COLS_V2_1	15
-#define PG_STAT_KCACHE_COLS			15	/* maximum of above */
+#define PG_STAT_KCACHE_COLS_V2_2	27
+#define PG_STAT_KCACHE_COLS			27	/* maximum of above */
 
 #define USAGE_INCREASE			(1.0)
 #define USAGE_DECREASE_FACTOR	(0.99)	/* decreased every pgsk_entry_dealloc */
@@ -89,12 +91,27 @@ typedef uint32 pgsk_queryid;
 typedef enum pgskVersion
 {
 	PGSK_V2_0 = 0,
-	PGSK_V2_1
+	PGSK_V2_1,
+	PGSK_V2_2
 } pgskVersion;
+
+typedef enum pgskStoreKind
+{
+	/*
+	 * PGSS_PLAN and PGSS_EXEC must be respectively 0 and 1 as they're used to
+	 * reference the underlying values in the arrays in the Counters struct,
+	 * and this order is required in pg_stat_statements_internal().
+	 */
+	PGSK_PLAN = 0,
+	PGSK_EXEC,
+
+	PGSK_NUMKIND				/* Must be last value of this enum */
+} pgskStoreKind;
 
 static const uint32 PGSK_FILE_HEADER = 0x0d756e10;
 
 static struct	rusage exec_rusage_start[PGSK_MAX_NESTED_LEVEL];
+static struct	rusage plan_rusage_start[PGSK_MAX_NESTED_LEVEL];
 
 /*
  * Current getrusage counters.
@@ -148,7 +165,7 @@ typedef struct pgskHashKey
 typedef struct pgskEntry
 {
 	pgskHashKey		key;		/* hash key of entry - MUST BE FIRST */
-	pgskCounters	counters;	/* statistics for this query */
+	pgskCounters	counters[PGSK_NUMKIND];	/* statistics for this query */
 	slock_t			mutex;		/* protects the counters only */
 } pgskEntry;
 
@@ -170,9 +187,13 @@ typedef struct pgskSharedState
 /* Current nesting depth of ExecutorRun+ProcessUtility calls */
 static int	exec_nested_level = 0;
 
+/* Current nesting depth of planner calls */
+static int	plan_nested_level = 0;
+
 
 /* saved hook address in case of unload */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
+static planner_hook_type prev_planner_hook = NULL;
 static ExecutorStart_hook_type prev_ExecutorStart = NULL;
 static ExecutorRun_hook_type prev_ExecutorRun = NULL;
 static ExecutorFinish_hook_type prev_ExecutorFinish = NULL;
@@ -200,6 +221,7 @@ static const struct config_enum_entry pgs_track_options[] =
 };
 
 static int	pgsk_track;			/* tracking level */
+static bool pgsk_track_planning;	/* whether to track planning duration */
 
 #define pgsk_enabled(level) \
 	((pgsk_track == PGSK_TRACK_ALL && (level) < PGSK_MAX_NESTED_LEVEL) || \
@@ -213,10 +235,12 @@ void	_PG_fini(void);
 extern PGDLLEXPORT Datum	pg_stat_kcache_reset(PG_FUNCTION_ARGS);
 extern PGDLLEXPORT Datum	pg_stat_kcache(PG_FUNCTION_ARGS);
 extern PGDLLEXPORT Datum	pg_stat_kcache_2_1(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum	pg_stat_kcache_2_2(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pg_stat_kcache_reset);
 PG_FUNCTION_INFO_V1(pg_stat_kcache);
 PG_FUNCTION_INFO_V1(pg_stat_kcache_2_1);
+PG_FUNCTION_INFO_V1(pg_stat_kcache_2_2);
 
 static void pg_stat_kcache_internal(FunctionCallInfo fcinfo, pgskVersion
 		api_version);
@@ -226,6 +250,10 @@ static Size pgsk_memsize(void);
 
 static void pgsk_shmem_startup(void);
 static void pgsk_shmem_shutdown(int code, Datum arg);
+static PlannedStmt *pgsk_planner(Query *parse,
+								 const char *query_string,
+								 int cursorOptions,
+								 ParamListInfo boundParams);
 static void pgsk_ExecutorStart(QueryDesc *queryDesc, int eflags);
 static void pgsk_ExecutorRun(QueryDesc *queryDesc,
 				 ScanDirection direction,
@@ -243,12 +271,17 @@ static void pgsk_ExecutorEnd(QueryDesc *queryDesc);
 static pgskEntry *pgsk_entry_alloc(pgskHashKey *key);
 static void pgsk_entry_dealloc(void);
 static void pgsk_entry_reset(void);
-static void pgsk_entry_store(pgsk_queryid queryId, pgskCounters counters);
+static void pgsk_entry_store(pgsk_queryid queryId, pgskStoreKind kind,
+							 pgskCounters counters);
 static uint32 pgsk_hash_fn(const void *key, Size keysize);
 static int	pgsk_match_fn(const void *key1, const void *key2, Size keysize);
 
 
 static bool pgsk_assign_linux_hz_check_hook(int *newval, void **extra, GucSource source);
+static void pgsk_compute_counters(pgskCounters *counters,
+								  struct rusage *rusage_start,
+								  struct rusage *rusage_end,
+								  QueryDesc *queryDesc);
 #if PG_VERSION_NUM >= 90600
 static Size pgsk_queryids_array_size(void);
 static void pgsk_set_queryid(pgsk_queryid queryid);
@@ -292,6 +325,17 @@ _PG_init(void)
 							 NULL,
 							 NULL);
 
+	DefineCustomBoolVariable("pg_stat_kcache.track_planning",
+							 "Selects whether planning duration is tracked by pg_stat_cache.",
+							 NULL,
+							 &pgsk_track_planning,
+							 false,
+							 PGC_SUSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
 	EmitWarningsOnPlaceholders("pg_stat_kcache");
 
 	/* set pgsk_max if needed */
@@ -306,6 +350,8 @@ _PG_init(void)
 	/* Install hook */
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = pgsk_shmem_startup;
+	prev_planner_hook = planner_hook;
+	planner_hook = pgsk_planner;
 	prev_ExecutorStart = ExecutorStart_hook;
 	ExecutorStart_hook = pgsk_ExecutorStart;
 	prev_ExecutorRun = ExecutorRun_hook;
@@ -320,11 +366,12 @@ void
 _PG_fini(void)
 {
 	/* uninstall hook */
+	shmem_startup_hook = prev_shmem_startup_hook;
+	planner_hook = prev_planner_hook;
 	ExecutorStart_hook = prev_ExecutorStart;
 	ExecutorRun_hook = prev_ExecutorRun;
 	ExecutorFinish_hook = prev_ExecutorFinish;
 	ExecutorEnd_hook = prev_ExecutorEnd;
-	shmem_startup_hook = prev_shmem_startup_hook;
 }
 
 static bool
@@ -350,6 +397,47 @@ pgsk_assign_linux_hz_check_hook(int *newval, void **extra, GucSource source)
 		elog(LOG, "pg_stat_kcache.linux_hz is set to %d", *newval);
 	}
 	return true;
+}
+
+static void
+pgsk_compute_counters(pgskCounters *counters,
+					  struct rusage *rusage_start,
+					  struct rusage *rusage_end,
+					  QueryDesc *queryDesc)
+{
+		/* Compute CPU time delta */
+		counters->utime = TIMEVAL_DIFF(rusage_start->ru_utime, rusage_end->ru_utime);
+		counters->stime = TIMEVAL_DIFF(rusage_start->ru_stime, rusage_end->ru_stime);
+
+		if (queryDesc && queryDesc->totaltime)
+		{
+			/* Make sure stats accumulation is done */
+			InstrEndLoop(queryDesc->totaltime);
+
+			/*
+			 * We only consider values greater than 3 * linux tick, otherwise the
+			 * bias is too big
+			 */
+			if (queryDesc->totaltime->total < (3. / pgsk_linux_hz))
+			{
+				counters->stime = 0;
+				counters->utime = queryDesc->totaltime->total;
+			}
+		}
+
+#ifdef HAVE_GETRUSAGE
+		/* Compute the rest of the counters */
+		counters->minflts = rusage_end->ru_minflt - rusage_start->ru_minflt;
+		counters->majflts = rusage_end->ru_majflt - rusage_start->ru_majflt;
+		counters->nswaps = rusage_end->ru_nswap - rusage_start->ru_nswap;
+		counters->reads = rusage_end->ru_inblock - rusage_start->ru_inblock;
+		counters->writes = rusage_end->ru_oublock - rusage_start->ru_oublock;
+		counters->msgsnds = rusage_end->ru_msgsnd - rusage_start->ru_msgsnd;
+		counters->msgrcvs = rusage_end->ru_msgrcv - rusage_start->ru_msgrcv;
+		counters->nsignals = rusage_end->ru_nsignals - rusage_start->ru_nsignals;
+		counters->nvcsws = rusage_end->ru_nvcsw - rusage_start->ru_nvcsw;
+		counters->nivcsws = rusage_end->ru_nivcsw - rusage_start->ru_nivcsw;
+#endif
 }
 
 #if PG_VERSION_NUM >= 90600
@@ -461,7 +549,8 @@ pgsk_shmem_startup(void)
 		entry = pgsk_entry_alloc(&temp.key);
 
 		/* copy in the actual stats */
-		entry->counters = temp.counters;
+		entry->counters[0] = temp.counters[0];
+		entry->counters[1] = temp.counters[1];
 		/* don't initialize spinlock, already done */
 	}
 
@@ -625,7 +714,8 @@ pgsk_queryids_array_size(void)
  */
 
 static void
-pgsk_entry_store(pgsk_queryid queryId, pgskCounters counters)
+pgsk_entry_store(pgsk_queryid queryId, pgskStoreKind kind,
+				 pgskCounters counters)
 {
 	volatile pgskEntry *e;
 
@@ -665,21 +755,21 @@ pgsk_entry_store(pgsk_queryid queryId, pgskCounters counters)
 
 	SpinLockAcquire(&e->mutex);
 
-	e->counters.usage += USAGE_INCREASE;
+	e->counters[0].usage += USAGE_INCREASE;
 
-	e->counters.utime += counters.utime;
-	e->counters.stime += counters.stime;
+	e->counters[kind].utime += counters.utime;
+	e->counters[kind].stime += counters.stime;
 #ifdef HAVE_GETRUSAGE
-	e->counters.minflts += counters.minflts;
-	e->counters.majflts += counters.majflts;
-	e->counters.nswaps += counters.nswaps;
-	e->counters.reads += counters.reads;
-	e->counters.writes += counters.writes;
-	e->counters.msgsnds += counters.msgsnds;
-	e->counters.msgrcvs += counters.msgrcvs;
-	e->counters.nsignals += counters.nsignals;
-	e->counters.nvcsws += counters.nvcsws;
-	e->counters.nivcsws += counters.nivcsws;
+	e->counters[kind].minflts += counters.minflts;
+	e->counters[kind].majflts += counters.majflts;
+	e->counters[kind].nswaps += counters.nswaps;
+	e->counters[kind].reads += counters.reads;
+	e->counters[kind].writes += counters.writes;
+	e->counters[kind].msgsnds += counters.msgsnds;
+	e->counters[kind].msgrcvs += counters.msgrcvs;
+	e->counters[kind].nsignals += counters.nsignals;
+	e->counters[kind].nvcsws += counters.nvcsws;
+	e->counters[kind].nivcsws += counters.nivcsws;
 #endif
 
 	SpinLockRelease(&e->mutex);
@@ -710,7 +800,7 @@ static pgskEntry *pgsk_entry_alloc(pgskHashKey *key)
 		/* reset the statistics */
 		memset(&entry->counters, 0, sizeof(pgskCounters));
 		/* set the appropriate initial usage count */
-		entry->counters.usage = USAGE_INIT;
+		entry->counters[0].usage = USAGE_INIT;
 		/* re-initialize the mutex each time ... we assume no one using it */
 		SpinLockInit(&entry->mutex);
 	}
@@ -724,8 +814,8 @@ static pgskEntry *pgsk_entry_alloc(pgskHashKey *key)
 static int
 entry_cmp(const void *lhs, const void *rhs)
 {
-	double		l_usage = (*(pgskEntry *const *) lhs)->counters.usage;
-	double		r_usage = (*(pgskEntry *const *) rhs)->counters.usage;
+	double		l_usage = (*(pgskEntry *const *) lhs)->counters[0].usage;
+	double		r_usage = (*(pgskEntry *const *) rhs)->counters[0].usage;
 
 	if (l_usage < r_usage)
 		return -1;
@@ -760,7 +850,7 @@ pgsk_entry_dealloc(void)
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
 		entries[i++] = entry;
-		entry->counters.usage *= USAGE_DECREASE_FACTOR;
+		entry->counters[0].usage *= USAGE_DECREASE_FACTOR;
 	}
 
 	qsort(entries, i, sizeof(pgskEntry *), entry_cmp);
@@ -795,6 +885,78 @@ static void pgsk_entry_reset(void)
 /*
  * Hooks
  */
+
+/*
+ * Planner hook: forward to regular planner, but measure planning time
+ * if needed.
+ */
+static PlannedStmt *
+pgsk_planner(Query *parse,
+			 const char *query_string,
+			 int cursorOptions,
+			 ParamListInfo boundParams)
+{
+	PlannedStmt *result;
+
+	/*
+	 * We can't process the query if no queryid has been computed.
+	 *
+	 * Note that planner_hook can be called from the planner itself, so we
+	 * have a specific nesting level for the planner.  However, utility
+	 * commands containing optimizable statements can also call the planner,
+	 * same for regular DML (for instance for underlying foreign key queries).
+	 * So testing the planner nesting level only is not enough to detect real
+	 * top level planner call.
+	 */
+	if (pgsk_enabled(plan_nested_level + exec_nested_level)
+		&& pgsk_track_planning
+		&& parse->queryId != UINT64CONST(0))
+	{
+		struct rusage *rusage_start = &plan_rusage_start[plan_nested_level];
+		struct rusage rusage_end;
+		pgskCounters counters;
+
+		/* capture kernel usage stats in rusage_start */
+		getrusage(RUSAGE_SELF, rusage_start);
+
+		plan_nested_level++;
+		PG_TRY();
+		{
+			if (prev_planner_hook)
+				result = prev_planner_hook(parse, query_string, cursorOptions,
+										   boundParams);
+			else
+				result = standard_planner(parse, query_string, cursorOptions,
+										  boundParams);
+			plan_nested_level--;
+		}
+		PG_CATCH();
+		{
+			plan_nested_level--;
+			PG_RE_THROW();
+		}
+		PG_END_TRY();
+
+		/* capture kernel usage stats in rusage_end */
+		getrusage(RUSAGE_SELF, &rusage_end);
+
+		pgsk_compute_counters(&counters, rusage_start, &rusage_end, NULL);
+
+		/* store current number of block reads and writes */
+		pgsk_entry_store(parse->queryId, PGSK_PLAN, counters);
+	}
+	else
+	{
+		if (prev_planner_hook)
+			result = prev_planner_hook(parse, query_string, cursorOptions,
+									   boundParams);
+		else
+			result = standard_planner(parse, query_string, cursorOptions,
+									  boundParams);
+	}
+
+	return result;
+}
 
 static void
 pgsk_ExecutorStart (QueryDesc *queryDesc, int eflags)
@@ -911,42 +1073,10 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 #endif
 		queryId = queryDesc->plannedstmt->queryId;
 
-		/* Compute CPU time delta */
-		counters.utime = TIMEVAL_DIFF(rusage_start->ru_utime, rusage_end.ru_utime);
-		counters.stime = TIMEVAL_DIFF(rusage_start->ru_stime, rusage_end.ru_stime);
-
-		if (queryDesc->totaltime)
-		{
-			/* Make sure stats accumulation is done */
-			InstrEndLoop(queryDesc->totaltime);
-
-			/*
-			 * We only consider values greater than 3 * linux tick, otherwise the
-			 * bias is too big
-			 */
-			if (queryDesc->totaltime->total < (3. / pgsk_linux_hz))
-			{
-				counters.stime = 0;
-				counters.utime = queryDesc->totaltime->total;
-			}
-		}
-
-#ifdef HAVE_GETRUSAGE
-		/* Compute the rest of the counters */
-		counters.minflts = rusage_end.ru_minflt - rusage_start->ru_minflt;
-		counters.majflts = rusage_end.ru_majflt - rusage_start->ru_majflt;
-		counters.nswaps = rusage_end.ru_nswap - rusage_start->ru_nswap;
-		counters.reads = rusage_end.ru_inblock - rusage_start->ru_inblock;
-		counters.writes = rusage_end.ru_oublock - rusage_start->ru_oublock;
-		counters.msgsnds = rusage_end.ru_msgsnd - rusage_start->ru_msgsnd;
-		counters.msgrcvs = rusage_end.ru_msgrcv - rusage_start->ru_msgrcv;
-		counters.nsignals = rusage_end.ru_nsignals - rusage_start->ru_nsignals;
-		counters.nvcsws = rusage_end.ru_nvcsw - rusage_start->ru_nvcsw;
-		counters.nivcsws = rusage_end.ru_nivcsw - rusage_start->ru_nivcsw;
-#endif
+		pgsk_compute_counters(&counters, rusage_start, &rusage_end, queryDesc);
 
 		/* store current number of block reads and writes */
-		pgsk_entry_store(queryId, counters);
+		pgsk_entry_store(queryId, PGSK_EXEC, counters);
 	}
 
 	/* give control back to PostgreSQL */
@@ -1017,6 +1147,14 @@ pg_stat_kcache_2_1(PG_FUNCTION_ARGS)
 	return (Datum) 0;
 }
 
+PGDLLEXPORT Datum
+pg_stat_kcache_2_2(PG_FUNCTION_ARGS)
+{
+	pg_stat_kcache_internal(fcinfo, PGSK_V2_2);
+
+	return (Datum) 0;
+}
+
 static void
 pg_stat_kcache_internal(FunctionCallInfo fcinfo, pgskVersion api_version)
 {
@@ -1068,6 +1206,7 @@ pg_stat_kcache_internal(FunctionCallInfo fcinfo, pgskVersion api_version)
 		bool			nulls[PG_STAT_KCACHE_COLS];
 		pgskCounters	tmp;
 		int				i = 0;
+		int				kind, min_kind = 0;
 #ifdef HAVE_GETRUSAGE
 		int64			reads, writes;
 #endif
@@ -1075,54 +1214,63 @@ pg_stat_kcache_internal(FunctionCallInfo fcinfo, pgskVersion api_version)
 		memset(values, 0, sizeof(values));
 		memset(nulls, 0, sizeof(nulls));
 
-		/* copy counters to a local variable to keep locking time short */
-		{
-			volatile pgskEntry *e = (volatile pgskEntry *) entry;
-
-			SpinLockAcquire(&e->mutex);
-			tmp = e->counters;
-			SpinLockRelease(&e->mutex);
-		}
-
 		values[i++] = Int64GetDatum(entry->key.queryid);
 		values[i++] = ObjectIdGetDatum(entry->key.userid);
 		values[i++] = ObjectIdGetDatum(entry->key.dbid);
-#ifdef HAVE_GETRUSAGE
-		reads = tmp.reads * RUSAGE_BLOCK_SIZE;
-		writes = tmp.writes * RUSAGE_BLOCK_SIZE;
-		values[i++] = Int64GetDatumFast(reads);
-		values[i++] = Int64GetDatumFast(writes);
-#else
-		nulls[i++] = true; /* reads */
-		nulls[i++] = true; /* writes */
-#endif
-		values[i++] = Float8GetDatumFast(tmp.utime);
-		values[i++] = Float8GetDatumFast(tmp.stime);
-		if (api_version >= PGSK_V2_1)
+
+		/* planning time (kind == 0) is added in v2.2 */
+		if (api_version < PGSK_V2_2)
+			min_kind = 1;
+
+		for (kind = min_kind; kind < PGSK_NUMKIND; kind++)
 		{
+			/* copy counters to a local variable to keep locking time short */
+			{
+				volatile pgskEntry *e = (volatile pgskEntry *) entry;
+
+				SpinLockAcquire(&e->mutex);
+				tmp = e->counters[kind];
+				SpinLockRelease(&e->mutex);
+			}
+
 #ifdef HAVE_GETRUSAGE
-			values[i++] = Int64GetDatumFast(tmp.minflts);
-			values[i++] = Int64GetDatumFast(tmp.majflts);
-			values[i++] = Int64GetDatumFast(tmp.nswaps);
-			values[i++] = Int64GetDatumFast(tmp.msgsnds);
-			values[i++] = Int64GetDatumFast(tmp.msgrcvs);
-			values[i++] = Int64GetDatumFast(tmp.nsignals);
-			values[i++] = Int64GetDatumFast(tmp.nvcsws);
-			values[i++] = Int64GetDatumFast(tmp.nivcsws);
+			reads = tmp.reads * RUSAGE_BLOCK_SIZE;
+			writes = tmp.writes * RUSAGE_BLOCK_SIZE;
+			values[i++] = Int64GetDatumFast(reads);
+			values[i++] = Int64GetDatumFast(writes);
 #else
-			nulls[i++] = true; /* minflts */
-			nulls[i++] = true; /* majflts */
-			nulls[i++] = true; /* nswaps */
-			nulls[i++] = true; /* msgsnds */
-			nulls[i++] = true; /* msgrcvs */
-			nulls[i++] = true; /* nsignals */
-			nulls[i++] = true; /* nvcsws */
-			nulls[i++] = true; /* nivcsws */
+			nulls[i++] = true; /* reads */
+			nulls[i++] = true; /* writes */
 #endif
+			values[i++] = Float8GetDatumFast(tmp.utime);
+			values[i++] = Float8GetDatumFast(tmp.stime);
+			if (api_version >= PGSK_V2_1)
+			{
+#ifdef HAVE_GETRUSAGE
+				values[i++] = Int64GetDatumFast(tmp.minflts);
+				values[i++] = Int64GetDatumFast(tmp.majflts);
+				values[i++] = Int64GetDatumFast(tmp.nswaps);
+				values[i++] = Int64GetDatumFast(tmp.msgsnds);
+				values[i++] = Int64GetDatumFast(tmp.msgrcvs);
+				values[i++] = Int64GetDatumFast(tmp.nsignals);
+				values[i++] = Int64GetDatumFast(tmp.nvcsws);
+				values[i++] = Int64GetDatumFast(tmp.nivcsws);
+#else
+				nulls[i++] = true; /* minflts */
+				nulls[i++] = true; /* majflts */
+				nulls[i++] = true; /* nswaps */
+				nulls[i++] = true; /* msgsnds */
+				nulls[i++] = true; /* msgrcvs */
+				nulls[i++] = true; /* nsignals */
+				nulls[i++] = true; /* nvcsws */
+				nulls[i++] = true; /* nivcsws */
+#endif
+			}
 		}
 
 		Assert(i == (api_version == PGSK_V2_0 ? PG_STAT_KCACHE_COLS_V2_0 :
 					 api_version == PGSK_V2_1 ? PG_STAT_KCACHE_COLS_V2_1 :
+					 api_version == PGSK_V2_2 ? PG_STAT_KCACHE_COLS_V2_2 :
 					 -1 /* fail if you forget to update this assert */ ));
 
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
