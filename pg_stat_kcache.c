@@ -798,7 +798,7 @@ static pgskEntry *pgsk_entry_alloc(pgskHashKey *key)
 		/* New entry, initialize it */
 
 		/* reset the statistics */
-		memset(&entry->counters, 0, sizeof(pgskCounters));
+		memset(&entry->counters, 0, sizeof(pgskCounters) * PGSK_NUMKIND);
 		/* set the appropriate initial usage count */
 		entry->counters[0].usage = USAGE_INIT;
 		/* re-initialize the mutex each time ... we assume no one using it */
