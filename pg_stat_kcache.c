@@ -63,8 +63,8 @@ typedef uint32 pgsk_queryid;
 
 #define PG_STAT_KCACHE_COLS_V2_0	7
 #define PG_STAT_KCACHE_COLS_V2_1	15
-#define PG_STAT_KCACHE_COLS_V2_2	27
-#define PG_STAT_KCACHE_COLS			27	/* maximum of above */
+#define PG_STAT_KCACHE_COLS_V2_2	28
+#define PG_STAT_KCACHE_COLS			28	/* maximum of above */
 
 #define USAGE_INCREASE			(1.0)
 #define USAGE_DECREASE_FACTOR	(0.99)	/* decreased every pgsk_entry_dealloc */
@@ -157,6 +157,7 @@ typedef struct pgskHashKey
 	Oid			userid;			/* user OID */
 	Oid			dbid;			/* database OID */
 	pgsk_queryid		queryid;		/* query identifier */
+	bool		top;		/* whether statement is top level */
 } pgskHashKey;
 
 /*
@@ -227,6 +228,8 @@ static bool pgsk_track_planning;	/* whether to track planning duration */
 	((pgsk_track == PGSK_TRACK_ALL && (level) < PGSK_MAX_NESTED_LEVEL) || \
 	(pgsk_track == PGSK_TRACK_TOP && (level) == 0))
 
+#define is_top(level) (level) == 0
+
 /*--- Functions --- */
 
 void	_PG_init(void);
@@ -272,7 +275,7 @@ static pgskEntry *pgsk_entry_alloc(pgskHashKey *key);
 static void pgsk_entry_dealloc(void);
 static void pgsk_entry_reset(void);
 static void pgsk_entry_store(pgsk_queryid queryId, pgskStoreKind kind,
-							 pgskCounters counters);
+							 int level, pgskCounters counters);
 static uint32 pgsk_hash_fn(const void *key, Size keysize);
 static int	pgsk_match_fn(const void *key1, const void *key2, Size keysize);
 
@@ -715,7 +718,7 @@ pgsk_queryids_array_size(void)
 
 static void
 pgsk_entry_store(pgsk_queryid queryId, pgskStoreKind kind,
-				 pgskCounters counters)
+				 int level, pgskCounters counters)
 {
 	volatile pgskEntry *e;
 
@@ -730,6 +733,7 @@ pgsk_entry_store(pgsk_queryid queryId, pgskStoreKind kind,
 	key.userid = GetUserId();
 	key.dbid = MyDatabaseId;
 	key.queryid = queryId;
+	key.top = is_top(level);
 
 	/* Lookup the hash table entry with shared lock. */
 	LWLockAcquire(pgsk->lock, LW_SHARED);
@@ -943,7 +947,7 @@ pgsk_planner(Query *parse,
 		pgsk_compute_counters(&counters, rusage_start, &rusage_end, NULL);
 
 		/* store current number of block reads and writes */
-		pgsk_entry_store(parse->queryId, PGSK_PLAN, counters);
+		pgsk_entry_store(parse->queryId, PGSK_PLAN, plan_nested_level + exec_nested_level, counters);
 	}
 	else
 	{
@@ -1076,7 +1080,7 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 		pgsk_compute_counters(&counters, rusage_start, &rusage_end, queryDesc);
 
 		/* store current number of block reads and writes */
-		pgsk_entry_store(queryId, PGSK_EXEC, counters);
+		pgsk_entry_store(queryId, PGSK_EXEC, exec_nested_level, counters);
 	}
 
 	/* give control back to PostgreSQL */
@@ -1215,6 +1219,8 @@ pg_stat_kcache_internal(FunctionCallInfo fcinfo, pgskVersion api_version)
 		memset(nulls, 0, sizeof(nulls));
 
 		values[i++] = Int64GetDatum(entry->key.queryid);
+		if (api_version >= PGSK_V2_2)
+			values[i++] = BoolGetDatum(entry->key.top);
 		values[i++] = ObjectIdGetDatum(entry->key.userid);
 		values[i++] = ObjectIdGetDatum(entry->key.dbid);
 

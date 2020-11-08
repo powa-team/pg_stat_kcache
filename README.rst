@@ -132,6 +132,8 @@ pg_stat_kcache_detail view
 +==================+==================+==========================================================================================================================================+
 | query            | text             | Query text                                                                                                                               |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
+| top              | bool             | True if the statement is top-level                                                                                                       |
++------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
 | datname          | name             | Database name                                                                                                                            |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
 | rolname          | name             | Role name                                                                                                                                |
@@ -217,6 +219,8 @@ It provides the following columns:
 +==================+==================+==========================================================================================================================================+
 | queryid          | bigint           | pg_stat_statements' query identifier                                                                                                     |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
+| top              | bool             | True if the statement is top-level                                                                                                       |
++------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
 | userid           | oid              | Database OID                                                                                                                             |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
 | dbid             | oid              | Database OID                                                                                                                             |
@@ -298,6 +302,12 @@ platform getrusage(2) manual page for more details.
 If *pg_stat_kcache.track* is all, pg_stat_kcache tracks nested statements.
 Now, the max number of nesting level to track is 64 due to implement simpler and
 it should be enough for reasonable use cases.
+
+Even if *pg_stat_kcache.track* is all, pg_stat_kcache view considers only
+statistics of top-level statements. So, there is the case which even though
+user cpu time used planning a nested statement is high, `plan_user_time` of
+pg_stat_kcache view is small. In such a case, user cpu time used planning a
+nested statement is counted in `exec_user_time`.
 
 Authors
 =======

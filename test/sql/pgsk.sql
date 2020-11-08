@@ -23,3 +23,22 @@ SELECT exec_user_time + exec_system_time > 0 AS cpu_time_ok
 FROM pg_stat_kcache_detail
 WHERE datname = current_database()
 AND query LIKE 'SELECT count(*) FROM test%';
+
+-- dummy nested query
+SET pg_stat_statements.track = 'all';
+SET pg_stat_statements.track_planning = TRUE;
+SET pg_stat_kcache.track = 'all';
+SET pg_stat_kcache.track_planning = TRUE;
+SELECT pg_stat_kcache_reset();
+
+CREATE OR REPLACE FUNCTION plpgsql_nested()
+  RETURNS void AS $$
+BEGIN
+  PERFORM i::text as str from generate_series(1, 100) as i;
+  PERFORM md5(i::text) as str from generate_series(1, 100) as i;
+END
+$$ LANGUAGE plpgsql;
+
+SELECT plpgsql_nested();
+
+SELECT COUNT(*) FROM pg_stat_kcache_detail WHERE top IS FALSE;

@@ -11,6 +11,7 @@ SET client_encoding = 'UTF8';
 
 CREATE FUNCTION pg_stat_kcache(
     OUT queryid bigint,
+    OUT top bool,
     OUT userid      oid,
     OUT dbid        oid,
     /* planning time */
@@ -52,7 +53,7 @@ CREATE FUNCTION pg_stat_kcache_reset()
 REVOKE ALL ON FUNCTION pg_stat_kcache_reset() FROM public;
 
 CREATE VIEW pg_stat_kcache_detail AS
-SELECT s.query, d.datname, r.rolname,
+SELECT s.query, k.top, d.datname, r.rolname,
        k.plan_user_time,
        k.plan_system_time,
        k.plan_minflts,
@@ -121,5 +122,6 @@ SELECT datname,
        SUM(exec_nvcsws) AS exec_nvcsws,
        SUM(exec_nivcsws) AS exec_nivcsws
   FROM pg_stat_kcache_detail
- GROUP BY datname;
+  WHERE top IS TRUE
+  GROUP BY datname;
 GRANT SELECT ON pg_stat_kcache TO public;
