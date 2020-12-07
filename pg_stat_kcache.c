@@ -1100,7 +1100,8 @@ pgsk_hash_fn(const void *key, Size keysize)
 
 	return hash_uint32((uint32) k->userid) ^
 		hash_uint32((uint32) k->dbid) ^
-		hash_uint32((uint32) k->queryid);
+		hash_uint32((uint32) k->queryid) ^
+		hash_uint32((uint32) k->top);
 }
 
 /*
@@ -1114,7 +1115,8 @@ pgsk_match_fn(const void *key1, const void *key2, Size keysize)
 
 	if (k1->userid == k2->userid &&
 		k1->dbid == k2->dbid &&
-		k1->queryid == k2->queryid)
+		k1->queryid == k2->queryid &&
+		k1->top == k2->top)
 		return 0;
 	else
 		return 1;
