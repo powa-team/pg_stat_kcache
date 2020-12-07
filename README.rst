@@ -50,9 +50,17 @@ Configuration
 
 The following GUCs can be configured, in ``postgresql.conf``:
 
-- *pg_stat_kcache.linux_hz* (int, default -1): informs pg_stat_kcache of the linux CONFIG_HZ config option. This is used by pg_stat_kcache to compensate for sampling errors. The default value is -1, tries to guess it at startup.
-- *pg_stat_kcache.track* (enum, default top): controls which statements are tracked by pg_stat_kcache. Specify top to track top-level statements (those issued directly by clients), all to also track nested statements (such as statements invoked within functions), or none to disable statement statistics collection.
-- *pg_stat_kcache.track_planning* (bool, default off): controls whether planning operations and duration are tracked by pg_stat_kcache.
+- *pg_stat_kcache.linux_hz* (int, default -1): informs pg_stat_kcache of the
+  linux CONFIG_HZ config option. This is used by pg_stat_kcache to compensate
+  for sampling errors. The default value is -1, tries to guess it at startup.
+- *pg_stat_kcache.track* (enum, default top): controls which statements are
+  tracked by pg_stat_kcache. Specify top to track top-level statements (those
+  issued directly by clients), all to also track nested statements (such as
+  statements invoked within functions), or none to disable statement statistics
+  collection.
+- *pg_stat_kcache.track_planning* (bool, default off): controls whether
+  planning operations and duration are tracked by pg_stat_kcache (requires
+  PostgreSQL 13 or above).
 
 Usage
 =====
@@ -287,6 +295,8 @@ Bugs and limitations
 
 No known bugs.
 
+Tracking planner resources usage requires PostgreSQL 13 or above.
+
 We assume that a kernel block is 512 bytes. This is true for Linux, but may not
 be the case for another Unix implementation.
 
@@ -300,8 +310,9 @@ maintained.  This is a platform dependent behavior, please refer to your
 platform getrusage(2) manual page for more details.
 
 If *pg_stat_kcache.track* is all, pg_stat_kcache tracks nested statements.
-Now, the max number of nesting level to track is 64 due to implement simpler and
-it should be enough for reasonable use cases.
+The max number of nesting level that will be tracked is is limited to 64, in
+order to keep implementation simple, but this should be enough for reasonable
+use cases.
 
 Even if *pg_stat_kcache.track* is all, pg_stat_kcache view considers only
 statistics of top-level statements. So, there is the case which even though
