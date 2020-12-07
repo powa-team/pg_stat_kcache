@@ -76,8 +76,8 @@ typedef uint32 pgsk_queryid;
  */
 #define RUSAGE_BLOCK_SIZE	512			/* Size of a block for getrusage() */
 
-#define TIMEVAL_DIFF(start, end) ((double) end.tv_sec + (double) end.tv_usec / 1000000.0) \
-	- ((double) start.tv_sec + (double) start.tv_usec / 1000000.0)
+#define TIMEVAL_DIFF(start, end) (((double) end.tv_sec + (double) end.tv_usec / 1000000.0) \
+	- ((double) start.tv_sec + (double) start.tv_usec / 1000000.0)) * 1000.0
 
 #if PG_VERSION_NUM < 140000
 #define ParallelLeaderBackendId ParallelMasterBackendId
@@ -129,8 +129,8 @@ typedef struct pgskCounters
 {
 	double			usage;		/* usage factor */
 	/* These fields are always used */
-	float8			utime;		/* CPU user time */
-	float8			stime;		/* CPU system time */
+	float8			utime;		/* CPU user time in msec */
+	float8			stime;		/* CPU system time in msec */
 #ifdef HAVE_GETRUSAGE
 	/* These fields are only used for platform with HAVE_GETRUSAGE defined */
 	int64			minflts;	/* page reclaims (soft page faults) */
@@ -421,7 +421,9 @@ pgsk_compute_counters(pgskCounters *counters,
 			if (queryDesc->totaltime->total < (3. / pgsk_linux_hz))
 			{
 				counters->stime = 0;
-				counters->utime = queryDesc->totaltime->total;
+
+				/* Change the unit from sec to msec */
+				counters->utime = queryDesc->totaltime->total * 1000.0;
 			}
 		}
 

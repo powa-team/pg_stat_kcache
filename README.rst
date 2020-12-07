@@ -67,9 +67,9 @@ pg_stat_kcache view
 +==================+==================+=========================================================================================================================================================+
 | datname          | name             | Name of the database                                                                                                                                    |
 +------------------+------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------+
-| plan_user_time   | double precision | User CPU time used planning statements in this database, in seconds and milliseconds (if pg_stat_kcache.track_planning is enabled, otherwise zero)      |
+| plan_user_time   | double precision | User CPU time used planning statements in this database, in milliseconds (if pg_stat_kcache.track_planning is enabled, otherwise zero)                  |
 +------------------+------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------+
-| plan_system_time | double precision | System CPU time used planning  statements in this database, in seconds and milliseconds (if pg_stat_kcache.track_planning is enabled, otherwise zero)   |
+| plan_system_time | double precision | System CPU time used planning  statements in this database, in milliseconds (if pg_stat_kcache.track_planning is enabled, otherwise zero)               |
 +------------------+------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------+
 | plan_minflts     | bigint           | Number of page reclaims (soft page faults) planning  statements in this database (if pg_stat_kcache.track_planning is enabled, otherwise zero)          |
 +------------------+------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -95,9 +95,9 @@ pg_stat_kcache view
 +------------------+------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------+
 | plan_nivcsws     | bigint           | Number of involuntary context switches planning  statements in this database (if pg_stat_kcache.track_planning is enabled, otherwise zero)              |
 +------------------+------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------+
-| exec_user_time   | double precision | User CPU time used executing  statements in this database, in seconds and milliseconds                                                                  |
+| exec_user_time   | double precision | User CPU time used executing  statements in this database, in milliseconds                                                                              |
 +------------------+------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------+
-| exec_system_time | double precision | System CPU time used executing  statements in this database, in seconds and milliseconds                                                                |
+| exec_system_time | double precision | System CPU time used executing  statements in this database, in milliseconds                                                                            |
 +------------------+------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------+
 | exec_minflts     | bigint           | Number of page reclaims (soft page faults) executing statements in this database                                                                        |
 +------------------+------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -136,9 +136,9 @@ pg_stat_kcache_detail view
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
 | rolname          | name             | Role name                                                                                                                                |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
-| plan_user_time   | double precision | User CPU time used planning the statement, in seconds and milliseconds (if pg_stat_kcache.track_planning is enabled, otherwise zero)     |
+| plan_user_time   | double precision | User CPU time used planning the statement, in milliseconds (if pg_stat_kcache.track_planning is enabled, otherwise zero)                 |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
-| plan_system_time | double precision | System CPU time used planning the statement, in seconds and milliseconds (if pg_stat_kcache.track_planning is enabled, otherwise zero)   |
+| plan_system_time | double precision | System CPU time used planning the statement, in milliseconds (if pg_stat_kcache.track_planning is enabled, otherwise zero)               |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
 | plan_minflts     | bigint           | Number of page reclaims (soft page faults) planning the statement (if pg_stat_kcache.track_planning is enabled, otherwise zero)          |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
@@ -164,9 +164,9 @@ pg_stat_kcache_detail view
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
 | plan_nivcsws     | bigint           | Number of involuntary context switches planning the statement (if pg_stat_kcache.track_planning is enabled, otherwise zero)              |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
-| exec_user_time   | double precision | User CPU time used executing the statement, in seconds and milliseconds                                                                  |
+| exec_user_time   | double precision | User CPU time used executing the statement, in milliseconds                                                                              |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
-| exec_system_time | double precision | System CPU time used executing the statement, in seconds and milliseconds                                                                |
+| exec_system_time | double precision | System CPU time used executing the statement, in milliseconds                                                                            |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
 | exec_minflts     | bigint           | Number of page reclaims (soft page faults) executing the statements                                                                      |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
@@ -221,9 +221,9 @@ It provides the following columns:
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
 | dbid             | oid              | Database OID                                                                                                                             |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
-| plan_user_time   | double precision | User CPU time used planning the statement, in seconds and milliseconds (if pg_stat_kcache.track_planning is enabled, otherwise zero)     |
+| plan_user_time   | double precision | User CPU time used planning the statement, in milliseconds (if pg_stat_kcache.track_planning is enabled, otherwise zero)                 |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
-| plan_system_time | double precision | System CPU time used planning the statement, in seconds and milliseconds (if pg_stat_kcache.track_planning is enabled, otherwise zero)   |
+| plan_system_time | double precision | System CPU time used planning the statement, in milliseconds (if pg_stat_kcache.track_planning is enabled, otherwise zero)               |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
 | plan_minflts     | bigint           | Number of page reclaims (soft page faults) planning the statement (if pg_stat_kcache.track_planning is enabled, otherwise zero)          |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
@@ -249,9 +249,9 @@ It provides the following columns:
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
 | plan_nivcsws     | bigint           | Number of involuntary context switches planning the statement (if pg_stat_kcache.track_planning is enabled, otherwise zero)              |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
-| exec_user_time   | double precision | User CPU time used executing the statement, in seconds and milliseconds                                                                  |
+| exec_user_time   | double precision | User CPU time used executing the statement, in milliseconds                                                                              |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
-| exec_system_time | double precision | System CPU time used executing the statement, in seconds and milliseconds                                                                |
+| exec_system_time | double precision | System CPU time used executing the statement, in milliseconds                                                                            |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
 | exec_minflts     | bigint           | Number of page reclaims (soft page faults) executing the statements                                                                      |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
