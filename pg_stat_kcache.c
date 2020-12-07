@@ -928,12 +928,10 @@ pgsk_planner(Query *parse,
 			else
 				result = standard_planner(parse, query_string, cursorOptions,
 										  boundParams);
-			plan_nested_level--;
 		}
-		PG_CATCH();
+		PG_FINALLY();
 		{
 			plan_nested_level--;
-			PG_RE_THROW();
 		}
 		PG_END_TRY();
 
@@ -1015,12 +1013,10 @@ pgsk_ExecutorRun(QueryDesc *queryDesc,
 #else
 			standard_ExecutorRun(queryDesc, direction, count);
 #endif
-		exec_nested_level--;
 	}
-	PG_CATCH();
+	PG_FINALLY();
 	{
 		exec_nested_level--;
-		PG_RE_THROW();
 	}
 	PG_END_TRY();
 }
@@ -1038,12 +1034,10 @@ pgsk_ExecutorFinish(QueryDesc *queryDesc)
 			prev_ExecutorFinish(queryDesc);
 		else
 			standard_ExecutorFinish(queryDesc);
-		exec_nested_level--;
 	}
-	PG_CATCH();
+	PG_FINALLY();
 	{
 		exec_nested_level--;
-		PG_RE_THROW();
 	}
 	PG_END_TRY();
 }
