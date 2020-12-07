@@ -108,7 +108,7 @@ typedef enum pgskStoreKind
 	PGSK_NUMKIND				/* Must be last value of this enum */
 } pgskStoreKind;
 
-static const uint32 PGSK_FILE_HEADER = 0x0d756e10;
+static const uint32 PGSK_FILE_HEADER = 0x0d756e11;
 
 static struct	rusage exec_rusage_start[PGSK_MAX_NESTED_LEVEL];
 static struct	rusage plan_rusage_start[PGSK_MAX_NESTED_LEVEL];
