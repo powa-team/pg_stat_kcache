@@ -33,7 +33,9 @@
 #include "executor/executor.h"
 #include "funcapi.h"
 #include "miscadmin.h"
+#if PG_VERSION_NUM >= 130000
 #include "optimizer/planner.h"
+#endif
 #include "pgstat.h"
 #if PG_VERSION_NUM >= 90600
 #include "postmaster/autovacuum.h"
@@ -111,7 +113,9 @@ typedef enum pgskStoreKind
 static const uint32 PGSK_FILE_HEADER = 0x0d756e11;
 
 static struct	rusage exec_rusage_start[PGSK_MAX_NESTED_LEVEL];
+#if PG_VERSION_NUM >= 130000
 static struct	rusage plan_rusage_start[PGSK_MAX_NESTED_LEVEL];
+#endif
 
 /*
  * Current getrusage counters.
@@ -188,13 +192,17 @@ typedef struct pgskSharedState
 /* Current nesting depth of ExecutorRun+ProcessUtility calls */
 static int	exec_nested_level = 0;
 
+#if PG_VERSION_NUM >= 130000
 /* Current nesting depth of planner calls */
 static int	plan_nested_level = 0;
+#endif
 
 
 /* saved hook address in case of unload */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
+#if PG_VERSION_NUM >= 130000
 static planner_hook_type prev_planner_hook = NULL;
+#endif
 static ExecutorStart_hook_type prev_ExecutorStart = NULL;
 static ExecutorRun_hook_type prev_ExecutorRun = NULL;
 static ExecutorFinish_hook_type prev_ExecutorFinish = NULL;
@@ -222,7 +230,9 @@ static const struct config_enum_entry pgs_track_options[] =
 };
 
 static int	pgsk_track;			/* tracking level */
+#if PG_VERSION_NUM >= 130000
 static bool pgsk_track_planning;	/* whether to track planning duration */
+#endif
 
 #define pgsk_enabled(level) \
 	((pgsk_track == PGSK_TRACK_ALL && (level) < PGSK_MAX_NESTED_LEVEL) || \
@@ -253,10 +263,12 @@ static Size pgsk_memsize(void);
 
 static void pgsk_shmem_startup(void);
 static void pgsk_shmem_shutdown(int code, Datum arg);
+#if PG_VERSION_NUM >= 130000
 static PlannedStmt *pgsk_planner(Query *parse,
 								 const char *query_string,
 								 int cursorOptions,
 								 ParamListInfo boundParams);
+#endif
 static void pgsk_ExecutorStart(QueryDesc *queryDesc, int eflags);
 static void pgsk_ExecutorRun(QueryDesc *queryDesc,
 				 ScanDirection direction,
@@ -328,6 +340,7 @@ _PG_init(void)
 							 NULL,
 							 NULL);
 
+#if PG_VERSION_NUM >= 130000
 	DefineCustomBoolVariable("pg_stat_kcache.track_planning",
 							 "Selects whether planning duration is tracked by pg_stat_cache.",
 							 NULL,
@@ -338,6 +351,7 @@ _PG_init(void)
 							 NULL,
 							 NULL,
 							 NULL);
+#endif
 
 	EmitWarningsOnPlaceholders("pg_stat_kcache");
 
@@ -353,8 +367,10 @@ _PG_init(void)
 	/* Install hook */
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = pgsk_shmem_startup;
+#if PG_VERSION_NUM >= 130000
 	prev_planner_hook = planner_hook;
 	planner_hook = pgsk_planner;
+#endif
 	prev_ExecutorStart = ExecutorStart_hook;
 	ExecutorStart_hook = pgsk_ExecutorStart;
 	prev_ExecutorRun = ExecutorRun_hook;
@@ -370,7 +386,9 @@ _PG_fini(void)
 {
 	/* uninstall hook */
 	shmem_startup_hook = prev_shmem_startup_hook;
+#if PG_VERSION_NUM >= 130000
 	planner_hook = prev_planner_hook;
+#endif
 	ExecutorStart_hook = prev_ExecutorStart;
 	ExecutorRun_hook = prev_ExecutorRun;
 	ExecutorFinish_hook = prev_ExecutorFinish;
@@ -890,6 +908,7 @@ static void pgsk_entry_reset(void)
  * Hooks
  */
 
+#if PG_VERSION_NUM >= 130000
 /*
  * Planner hook: forward to regular planner, but measure planning time
  * if needed.
@@ -961,6 +980,7 @@ pgsk_planner(Query *parse,
 
 	return result;
 }
+#endif
 
 static void
 pgsk_ExecutorStart (QueryDesc *queryDesc, int eflags)
