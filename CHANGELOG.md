@@ -1,3 +1,16 @@
+## 2.2.0 (WIP)
+
+**New features**:
+
+  - Add pg_stat_kcache.track option, similar to pg_stat_statements (Julien
+    Rouhaud and github user mikecaat)
+  - Add pg_stat_statements.track_planning, similar to pg_stat_statements, to
+    track usge during planning.  Requires PostgreSQL 13 or above (Julien
+    Rouhaud, github user mikecaat)
+  - Add a new "top" column, and accumulate resource usage in different entries
+    depending on whether queries are executed at top level or at nested
+    statements. (github user mikecaat and Julien Rouhaud)
+
 ## 2.1.3 (2020-07-16)
 
 **Bugfix**:
