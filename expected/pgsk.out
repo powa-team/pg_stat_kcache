@@ -1,5 +1,18 @@
 CREATE EXTENSION pg_stat_statements;
 CREATE EXTENSION pg_stat_kcache;
+-- first make sure that catcache is loaded to avoid physical reads
+SELECT count(*) >= 0 FROM pg_stat_kcache;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT pg_stat_kcache_reset();
+ pg_stat_kcache_reset 
+----------------------
+ 
+(1 row)
+
 -- dummy query
 SELECT 1 AS dummy;
  dummy 
