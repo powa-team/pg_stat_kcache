@@ -290,6 +290,20 @@ It provides the following columns:
 | exec_nivcsws     | bigint           | Number of involuntary context switches executing the statements                                                                          |
 +------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------+
 
+Updating the extension
+======================
+
+Note that a PostgreSQL restart is required for changes other than than SQL
+objects.  Most of the new code will be enabled as soon as the restart is done,
+whether or not the extension is updated, as the extension only takes care of
+exposing the internal data structure in SQL.
+
+Please also note that when the set-returning function fields are changes, a
+PostgreSQL restart is required to load the new version of the extension.  Until
+the restart is done, updating the extension will fail with messages similar to:
+
+could not find function "pg_stat_kcache_2_2" in file .../pg_stat_kcache.so
+
 Bugs and limitations
 ====================
 
