@@ -350,5 +350,5 @@ License
 pg_stat_kcache is free software distributed under the PostgreSQL license.
 
 Copyright (c) 2014-2017, Dalibo
-Copyright (c) 2018-2020, The PoWA-team
+Copyright (c) 2018-2021, The PoWA-team
 

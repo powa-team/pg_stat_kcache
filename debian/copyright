@@ -1,5 +1,5 @@
 Portions Copyright (c) 2014-2017, Dalibo
-Portions Copyright (c) 2018, The PoWA-team
+Portions Copyright (c) 2018-2021, The PoWA-team
 
 Permission to use, copy, modify, and distribute this software and its
 documentation for any purpose, without fee, and without a written agreement
@@ -27,3 +27,7 @@ Contributors to pg_stat_kcache:
   * Alain Delorme
   * Jean-Sébastien Bacq
   * edechaux
+  * Felix Geisendörfer
+  * github user atorik
+  * github user tbe
+  * github user mikecaat
