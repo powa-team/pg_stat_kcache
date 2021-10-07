@@ -46,6 +46,7 @@
 #include "utils/builtins.h"
 #include "utils/guc.h"
 
+#include "pg_stat_kcache.h"
 
 PG_MODULE_MAGIC;
 
@@ -63,20 +64,10 @@ typedef uint64 pgsk_queryid;
 typedef uint32 pgsk_queryid;
 #endif
 
-#define PG_STAT_KCACHE_COLS_V2_0	7
-#define PG_STAT_KCACHE_COLS_V2_1	15
-#define PG_STAT_KCACHE_COLS_V2_2	28
-#define PG_STAT_KCACHE_COLS			28	/* maximum of above */
-
 #define USAGE_INCREASE			(1.0)
 #define USAGE_DECREASE_FACTOR	(0.99)	/* decreased every pgsk_entry_dealloc */
 #define USAGE_DEALLOC_PERCENT	5		/* free this % of entries at once */
 #define USAGE_INIT				(1.0)	/* including initial planning */
-
-/* ru_inblock block size is 512 bytes with Linux
- * see http://lkml.indiana.edu/hypermail/linux/kernel/0703.2/0937.html
- */
-#define RUSAGE_BLOCK_SIZE	512			/* Size of a block for getrusage() */
 
 #define TIMEVAL_DIFF(start, end) ((double) end.tv_sec + (double) end.tv_usec / 1000000.0) \
 	- ((double) start.tv_sec + (double) start.tv_usec / 1000000.0)
@@ -97,58 +88,12 @@ typedef enum pgskVersion
 	PGSK_V2_2
 } pgskVersion;
 
-typedef enum pgskStoreKind
-{
-	/*
-	 * PGSS_PLAN and PGSS_EXEC must be respectively 0 and 1 as they're used to
-	 * reference the underlying values in the arrays in the Counters struct,
-	 * and this order is required in pg_stat_statements_internal().
-	 */
-	PGSK_PLAN = 0,
-	PGSK_EXEC,
-
-	PGSK_NUMKIND				/* Must be last value of this enum */
-} pgskStoreKind;
-
 static const uint32 PGSK_FILE_HEADER = 0x0d756e11;
 
 static struct	rusage exec_rusage_start[PGSK_MAX_NESTED_LEVEL];
 #if PG_VERSION_NUM >= 130000
 static struct	rusage plan_rusage_start[PGSK_MAX_NESTED_LEVEL];
 #endif
-
-/*
- * Current getrusage counters.
- *
- * For platform without getrusage support, we rely on postgres implementation
- * defined in rusagestub.h, which only supports user and system time.
- *
- * Note that the following counters are not maintained on GNU/Linux:
- *   - ru_nswap
- *   - ru_msgsnd
- *   - ru_msgrcv
- *   - ru_nsignals
-*/
-typedef struct pgskCounters
-{
-	double			usage;		/* usage factor */
-	/* These fields are always used */
-	float8			utime;		/* CPU user time */
-	float8			stime;		/* CPU system time */
-#ifdef HAVE_GETRUSAGE
-	/* These fields are only used for platform with HAVE_GETRUSAGE defined */
-	int64			minflts;	/* page reclaims (soft page faults) */
-	int64			majflts;	/* page faults (hard page faults) */
-	int64			nswaps;		/* swaps */
-	int64			reads;		/* Physical block reads */
-	int64			writes;		/* Physical block writes */
-	int64			msgsnds;	/* IPC messages sent */
-	int64			msgrcvs;	/* IPC messages received */
-	int64			nsignals;	/* signals received */
-	int64			nvcsws;		/* voluntary context witches */
-	int64			nivcsws;	/* unvoluntary context witches */
-#endif
-} pgskCounters;
 
 static int	pgsk_max = 0;	/* max #queries to store. pg_stat_statements.max is used */
 
