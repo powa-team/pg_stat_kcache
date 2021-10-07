@@ -53,3 +53,11 @@ typedef enum pgskStoreKind
 
     PGSK_NUMKIND				/* Must be last value of this enum */
 } pgskStoreKind;
+
+/* Hook for extensions to use pgskCounters right after calculation. */
+typedef void (*pgsk_counters_hook_type) (
+        pgskCounters *counters,
+        const char *query_string,
+        int level,
+        pgskStoreKind kind);
+pgsk_counters_hook_type pgsk_counters_hook = NULL;
