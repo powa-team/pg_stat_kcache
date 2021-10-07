@@ -912,6 +912,12 @@ pgsk_planner(Query *parse,
 
 		/* store current number of block reads and writes */
 		pgsk_entry_store(parse->queryId, PGSK_PLAN, plan_nested_level + exec_nested_level, counters);
+
+		if (pgsk_counters_hook)
+		    pgsk_counters_hook(&counters,
+                               query_string,
+                               plan_nested_level + exec_nested_level,
+                               PGSK_PLAN);
 	}
 	else
 	{
@@ -1046,6 +1052,12 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 
 		/* store current number of block reads and writes */
 		pgsk_entry_store(queryId, PGSK_EXEC, exec_nested_level, counters);
+
+		if (pgsk_counters_hook)
+		    pgsk_counters_hook(&counters,
+                               (const char *)queryDesc->sourceText,
+                               exec_nested_level,
+                               PGSK_EXEC);
 	}
 
 	/* give control back to PostgreSQL */
