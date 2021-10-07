@@ -915,9 +915,9 @@ pgsk_planner(Query *parse,
 
 		if (pgsk_counters_hook)
 		    pgsk_counters_hook(&counters,
-                               query_string,
-                               plan_nested_level + exec_nested_level,
-                               PGSK_PLAN);
+							   query_string,
+							   plan_nested_level + exec_nested_level,
+							   PGSK_PLAN);
 	}
 	else
 	{
@@ -1055,9 +1055,9 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 
 		if (pgsk_counters_hook)
 		    pgsk_counters_hook(&counters,
-                               (const char *)queryDesc->sourceText,
-                               exec_nested_level,
-                               PGSK_EXEC);
+							   (const char *)queryDesc->sourceText,
+							   exec_nested_level,
+							   PGSK_EXEC);
 	}
 
 	/* give control back to PostgreSQL */
