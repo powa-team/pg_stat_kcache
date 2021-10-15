@@ -8,3 +8,4 @@
   * Felix Geisendörfer
   * github user atorik
   * github user tbe
+  * github user mikecaat
