@@ -1,3 +1,9 @@
+pg-stat-kcache (2.2.0-2) unstable; urgency=medium
+
+  * Upload for PostgreSQL 14.
+
+ -- Christoph Berg <myon@debian.org>  Fri, 15 Oct 2021 15:44:51 +0200
+
 pg-stat-kcache (2.2.0-1) unstable; urgency=medium
 
   * New upstream version.

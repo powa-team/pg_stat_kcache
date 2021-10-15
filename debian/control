@@ -9,10 +9,10 @@ Homepage: https://powa.readthedocs.io/
 Vcs-Browser: https://github.com/powa-team/pg_stat_kcache
 Vcs-Git: https://github.com/powa-team/pg_stat_kcache.git
 
-Package: postgresql-13-pg-stat-kcache
+Package: postgresql-14-pg-stat-kcache
 Architecture: any
-Depends: ${misc:Depends}, ${shlibs:Depends}, postgresql-13,
- postgresql-contrib-13
+Depends: ${misc:Depends}, ${shlibs:Depends}, postgresql-14,
+ postgresql-contrib-14
 Description: PostgreSQL extension to gather per-query kernel statistics.
  Statistics gathered are reads and writes done out of the operating system
  cache, user and system CPU usage, context switches and all the other
