@@ -40,6 +40,9 @@
 #if PG_VERSION_NUM >= 90600
 #include "postmaster/autovacuum.h"
 #endif
+#if PG_VERSION_NUM >= 120000
+#include "replication/walsender.h"
+#endif
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/spin.h"
@@ -665,12 +668,18 @@ pgsk_queryids_array_size(void)
 {
 	/*
 	 * queryid isn't pushed to parallel workers.  We store them in shared mem
-	 * for each query, identified by their BackendId.  If need room for all
-	 * possible backends, plus autovacuum launcher and workers, plus bg workers
-	 * and an extra one since BackendId numerotation starts at 1.
+	 * for each query, identified by their BackendId.  It therefore needs room
+	 * for all possible backends, plus autovacuum launcher and workers, plus bg
+	 * workers and an extra one since BackendId numerotation starts at 1.
+	 * Starting with pg12, wal senders aren't part of MaxConnections anymore,
+	 * so they need to be accounted for.
 	 */
 	return (sizeof(pgsk_queryid) * (MaxConnections + autovacuum_max_workers + 1
-							+ max_worker_processes + 1));
+							+ max_worker_processes
+#if PG_VERSION_NUM >= 120000
+							+ max_wal_senders
+#endif
+							+ 1));
 }
 #endif
 
