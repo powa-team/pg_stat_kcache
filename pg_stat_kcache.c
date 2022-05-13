@@ -191,7 +191,6 @@ static bool pgsk_track_planning;	/* whether to track planning duration */
 /*--- Functions --- */
 
 void	_PG_init(void);
-void	_PG_fini(void);
 
 extern PGDLLEXPORT Datum	pg_stat_kcache_reset(PG_FUNCTION_ARGS);
 extern PGDLLEXPORT Datum	pg_stat_kcache(PG_FUNCTION_ARGS);
@@ -327,20 +326,6 @@ _PG_init(void)
 	ExecutorFinish_hook = pgsk_ExecutorFinish;
 	prev_ExecutorEnd = ExecutorEnd_hook;
 	ExecutorEnd_hook = pgsk_ExecutorEnd;
-}
-
-void
-_PG_fini(void)
-{
-	/* uninstall hook */
-	shmem_startup_hook = prev_shmem_startup_hook;
-#if PG_VERSION_NUM >= 130000
-	planner_hook = prev_planner_hook;
-#endif
-	ExecutorStart_hook = prev_ExecutorStart;
-	ExecutorRun_hook = prev_ExecutorRun;
-	ExecutorFinish_hook = prev_ExecutorFinish;
-	ExecutorEnd_hook = prev_ExecutorEnd;
 }
 
 static bool
