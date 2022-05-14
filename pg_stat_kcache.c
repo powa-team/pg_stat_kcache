@@ -147,6 +147,9 @@ static int	plan_nested_level = 0;
 
 
 /* saved hook address in case of unload */
+#if PG_VERSION_NUM >= 150000
+static shmem_request_hook_type prev_shmem_request_hook = NULL;
+#endif
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 #if PG_VERSION_NUM >= 130000
 static planner_hook_type prev_planner_hook = NULL;
@@ -208,6 +211,9 @@ static void pg_stat_kcache_internal(FunctionCallInfo fcinfo, pgskVersion
 static void pgsk_setmax(void);
 static Size pgsk_memsize(void);
 
+#if PG_VERSION_NUM >= 150000
+static void pgsk_shmem_request(void);
+#endif
 static void pgsk_shmem_startup(void);
 static void pgsk_shmem_shutdown(int code, Datum arg);
 #if PG_VERSION_NUM >= 130000
@@ -304,14 +310,24 @@ _PG_init(void)
 
 	/* set pgsk_max if needed */
 	pgsk_setmax();
+	/*
+	 * If you change code here, don't forget to also report the modifications
+	 * in pgsk_shmem_request() for pg15 and later.
+	 */
+#if PG_VERSION_NUM < 150000
 	RequestAddinShmemSpace(pgsk_memsize());
 #if PG_VERSION_NUM >= 90600
 	RequestNamedLWLockTranche("pg_stat_kcache", 2);
 #else
 	RequestAddinLWLocks(1);
-#endif
+#endif		/* pg 9.6+ */
+#endif		/* pg 15- */
 
 	/* Install hook */
+#if PG_VERSION_NUM >= 150000
+	prev_shmem_request_hook = shmem_request_hook;
+	shmem_request_hook = pgsk_shmem_request;
+#endif
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = pgsk_shmem_startup;
 #if PG_VERSION_NUM >= 130000
@@ -404,6 +420,24 @@ pgsk_set_queryid(pgsk_queryid queryid)
 	LWLockAcquire(pgsk->queryids_lock, LW_EXCLUSIVE);
 	pgsk->queryids[MyBackendId] = queryid;
 	LWLockRelease(pgsk->queryids_lock);
+}
+#endif
+
+#if PG_VERSION_NUM >= 150000
+/*
+ * Request additional shared memory resources.
+ *
+ * If you change code here, don't forget to also report the modifications in
+ * _PG_init() for pg14 and below.
+ */
+static void
+pgsk_shmem_request(void)
+{
+	if (prev_shmem_request_hook)
+		prev_shmem_request_hook();
+
+	RequestAddinShmemSpace(pgsk_memsize());
+	RequestNamedLWLockTranche("pg_stat_kcache", 2);
 }
 #endif
 
@@ -659,12 +693,17 @@ pgsk_queryids_array_size(void)
 	 * Starting with pg12, wal senders aren't part of MaxConnections anymore,
 	 * so they need to be accounted for.
 	 */
+#if PG_VERSION_NUM >= 150000
+	Assert (MaxBackends > 0);
+	return (sizeof(pgsk_queryid) * (MaxBackends + 1));
+#else
 	return (sizeof(pgsk_queryid) * (MaxConnections + autovacuum_max_workers + 1
 							+ max_worker_processes
 #if PG_VERSION_NUM >= 120000
 							+ max_wal_senders
-#endif
+#endif		/* pg12+ */
 							+ 1));
+#endif		/* pg15- */
 }
 #endif
 
