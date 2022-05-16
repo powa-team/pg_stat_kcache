@@ -10,3 +10,5 @@
   * github user tbe
   * github user mikecaat
   * github user munakoiso
+  * Christoph Berg
+  * Sviatoslav Ermilin

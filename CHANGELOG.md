@@ -1,3 +1,19 @@
+## 2.2.1 (2022-05-16)
+
+**Bugfix**:
+
+  - Fix memory allocation on postgres 12 and above (Julien Rouhaud)
+**New features**:
+
+  - Expose some structures and add a counters hook so other extensions can
+    extend this extension's metrics (Sviatoslav Ermilin)
+
+**Miscellaneous**:
+
+  - Various improvements to the debian packaging (Christoph Berg)
+  - Add compatibility with postgres 15 (Julien Rouhaud)
+  - Improve extension update documentation (Julien Rouhaud)
+
 ## 2.2.0 (2020-12-10)
 
 **New features**:
