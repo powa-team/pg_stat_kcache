@@ -17,6 +17,7 @@
 
 #include <unistd.h>
 
+#if PG_VERSION_NUM < 160000
 #ifdef HAVE_SYS_RESOURCE_H
 #include <sys/time.h>
 #include <sys/resource.h>
@@ -24,6 +25,7 @@
 
 #ifndef HAVE_GETRUSAGE
 #include "rusagestub.h"
+#endif
 #endif
 
 #include "access/hash.h"
@@ -48,6 +50,9 @@
 #include "storage/spin.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
+#if PG_VERSION_NUM >= 160000
+#include "utils/pg_rusage.h"
+#endif
 
 #include "pg_stat_kcache.h"
 
