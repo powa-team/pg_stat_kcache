@@ -2,7 +2,7 @@ Source: pg-stat-kcache
 Section: database
 Priority: optional
 Maintainer: Julien Rouhaud <rjuju123@gmail.com>
-Standards-Version: 4.5.0
+Standards-Version: 4.6.1
 Rules-Requires-Root: no
 Build-Depends: debhelper-compat (= 13), postgresql-all (>= 217~)
 Homepage: https://powa.readthedocs.io/
