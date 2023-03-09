@@ -13,6 +13,28 @@ queryid field.
 Installation
 ============
 
+From PGDG repositories
+----------------------
+
+If you installed PostgreSQL from the PGDG repositories (either `APT on
+Debian/Ubuntu <https://apt.postgresql.org>` or `YUM on RHEL/Rocky
+<https://yum.postgresql.org`), the recommended way to install pg_stat_kcache is
+to get it from the same repositories.
+
+For Debian/Ubuntu::
+
+  apt install postgresql-XY-pg-stat-kcache
+
+and RHEL/Rocky::
+
+  yum install pg_stat_kcacheXY
+
+or for PostgreSQL 11 and above::
+
+  yum install pg_stat_kcache_XY
+
+(where XY is your major PostgreSQL version)
+
 Compiling
 ---------
 
