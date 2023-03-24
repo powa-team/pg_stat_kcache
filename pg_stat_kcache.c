@@ -185,9 +185,9 @@ static const struct config_enum_entry pgs_track_options[] =
 	{NULL, 0, false}
 };
 
-static int	pgsk_track;			/* tracking level */
+static int	pgsk_track = PGSK_TRACK_TOP;	/* tracking level */
 #if PG_VERSION_NUM >= 130000
-static bool pgsk_track_planning;	/* whether to track planning duration */
+static bool pgsk_track_planning = false;	/* whether to track planning duration */
 #endif
 
 #define pgsk_enabled(level) \
@@ -260,7 +260,7 @@ static Size pgsk_queryids_array_size(void);
 static void pgsk_set_queryid(pgsk_queryid queryid);
 #endif
 
-static int	pgsk_linux_hz;
+static int	pgsk_linux_hz = 0;
 
 void
 _PG_init(void)
