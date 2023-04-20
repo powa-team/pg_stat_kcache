@@ -145,6 +145,9 @@ typedef struct pgskSharedState
 /* Current nesting depth of ExecutorRun+ProcessUtility calls */
 static int	exec_nested_level = 0;
 
+static int	lock_iteration_count = 10;
+static int	lock_backoff_timeout = 100;
+
 #if PG_VERSION_NUM >= 130000
 /* Current nesting depth of planner calls */
 static int	plan_nested_level = 0;
@@ -746,7 +749,22 @@ pgsk_entry_store(pgsk_queryid queryId, pgskStoreKind kind,
 	{
 		/* Need exclusive lock to make a new hashtable entry - promote */
 		LWLockRelease(pgsk->lock);
-		LWLockAcquire(pgsk->lock, LW_EXCLUSIVE);
+
+		if (lock_iteration_count == 0)
+			LWLockAcquire(pgsk->lock, LW_EXCLUSIVE);
+		else
+			for (int i = 0; i < lock_iteration_count; i++)
+			{
+				if (LWLockConditionalAcquire(pgsk->lock, LW_EXCLUSIVE))
+					break;
+				if (i > lock_iteration_count / 2)
+					pg_usleep(i * lock_backoff_timeout);
+				if (i == lock_iteration_count - 1)
+				{
+					elog(DEBUG1, "could not enter query information to pgsk");
+					return;
+				}
+			}
 
 		/* OK to create a new hashtable entry */
 		entry = pgsk_entry_alloc(&key);
@@ -876,7 +894,21 @@ static void pgsk_entry_reset(void)
 	HASH_SEQ_STATUS hash_seq;
 	pgskEntry  *entry;
 
-	LWLockAcquire(pgsk->lock, LW_EXCLUSIVE);
+	if (lock_iteration_count == 0)
+		LWLockAcquire(pgsk->lock, LW_EXCLUSIVE);
+	else
+		for (int i = 0; i < lock_iteration_count; i++)
+		{
+			if (LWLockConditionalAcquire(pgsk->lock, LW_EXCLUSIVE))
+				break;
+			if (i > lock_iteration_count / 2)
+				pg_usleep(i * lock_backoff_timeout);
+			if (i == lock_iteration_count - 1)
+			{
+				elog(DEBUG1, "could not enter query information to pgsk");
+				return;
+			}
+		}
 
 	hash_seq_init(&hash_seq, pgsk_hash);
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
