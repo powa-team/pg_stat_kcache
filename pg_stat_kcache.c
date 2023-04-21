@@ -905,7 +905,7 @@ static void pgsk_entry_reset(void)
 				pg_usleep(i * lock_backoff_timeout);
 			if (i == lock_iteration_count - 1)
 			{
-				elog(DEBUG1, "could not enter query information to pgsk");
+				elog(WARNING, "pgsk_entry_reset failed to aquire lock, reset not done");
 				return;
 			}
 		}
