@@ -1,3 +1,16 @@
+pg-stat-kcache (2.2.2-1) UNRELEASED; urgency=medium
+
+  * New upstream version with PG16 support.
+
+ -- Christoph Berg <myon@debian.org>  Sat, 29 Jul 2023 18:33:46 +0200
+
+pg-stat-kcache (2.2.1-2) unstable; urgency=medium
+
+  * Team upload for PostgreSQL 15.
+  * debian/watch: Look at GitHub tags instead of releases.
+
+ -- Christoph Berg <myon@debian.org>  Fri, 21 Oct 2022 11:03:01 +0200
+
 pg-stat-kcache (2.2.1-1) unstable; urgency=medium
 
   * New upstream version.
