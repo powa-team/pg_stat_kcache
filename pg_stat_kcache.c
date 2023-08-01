@@ -17,16 +17,26 @@
 
 #include <unistd.h>
 
+/*
+ * pg16 removed the configure probe for getrusage. Simply define it for all
+ * platforms except Windows to keep existing code backward compatible.
+ */
+#if PG_VERSION_NUM >= 160000
+#ifndef WIN32
+#define HAVE_GETRUSAGE
+#endif		/* HAVE_GETRUSAGE */
+#endif		/* pg16+ */
+
 #if PG_VERSION_NUM < 160000
 #ifdef HAVE_SYS_RESOURCE_H
 #include <sys/time.h>
 #include <sys/resource.h>
-#endif
+#endif		/* HAVE_SYS_RESOURCE_H */
 
 #ifndef HAVE_GETRUSAGE
 #include "rusagestub.h"
-#endif
-#endif
+#endif		/* !HAVE_GETRUSAGE */
+#endif		/* pg16- */
 
 #include "access/hash.h"
 #if PG_VERSION_NUM >= 90600
