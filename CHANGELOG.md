@@ -1,3 +1,12 @@
+## 2.2.2 (2023-08-01)
+
+**Miscellaneous**:
+
+  - Add postgres 16 compatibility (Julien Rouhaud, Christoph Berg, Japin Li)
+  - Add CI (Christoph Berg)
+  - Recommend installation from PGDG repository rather than compiling the
+    extension (Julien Rouhaud)
+
 ## 2.2.1 (2022-05-16)
 
 **Bugfix**:
