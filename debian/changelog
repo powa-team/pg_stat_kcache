@@ -1,3 +1,11 @@
+pg-stat-kcache (2.2.2-2) unstable; urgency=medium
+
+  * Team upload.
+  * Upload for PostgreSQL 16.
+  * Use ${postgresql:Depends}.
+
+ -- Christoph Berg <myon@debian.org>  Sun, 17 Sep 2023 21:02:35 +0200
+
 pg-stat-kcache (2.2.2-1) unstable; urgency=medium
 
   * Team upload.
