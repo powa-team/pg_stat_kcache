@@ -1310,7 +1310,4 @@ pg_stat_kcache_internal(FunctionCallInfo fcinfo, pgskVersion api_version)
 	}
 
 	LWLockRelease(pgsk->lock);
-
-	/* clean up and return the tuplestore */
-	tuplestore_donestoring(tupstore);
 }
