@@ -144,7 +144,6 @@ typedef struct pgskSharedState
 {
 	LWLock	   *lock;					/* protects hashtable search/modification */
 #if PG_VERSION_NUM >= 90600
-	LWLock	   *queryids_lock;			/* protects queryids array */
 	pgsk_queryid	queryids[FLEXIBLE_ARRAY_MEMBER]; /* queryid info for
 														parallel leaders */
 #endif
@@ -332,7 +331,7 @@ _PG_init(void)
 #if PG_VERSION_NUM < 150000
 	RequestAddinShmemSpace(pgsk_memsize());
 #if PG_VERSION_NUM >= 90600
-	RequestNamedLWLockTranche("pg_stat_kcache", 2);
+	RequestNamedLWLockTranche("pg_stat_kcache", 1);
 #else
 	RequestAddinLWLocks(1);
 #endif		/* pg 9.6+ */
@@ -432,9 +431,7 @@ pgsk_set_queryid(pgsk_queryid queryid)
 	/* Only the leader knows the queryid. */
 	Assert(!IsParallelWorker());
 
-	LWLockAcquire(pgsk->queryids_lock, LW_EXCLUSIVE);
 	pgsk->queryids[MyBackendId] = queryid;
-	LWLockRelease(pgsk->queryids_lock);
 }
 #endif
 
@@ -452,7 +449,7 @@ pgsk_shmem_request(void)
 		prev_shmem_request_hook();
 
 	RequestAddinShmemSpace(pgsk_memsize());
-	RequestNamedLWLockTranche("pg_stat_kcache", 2);
+	RequestNamedLWLockTranche("pg_stat_kcache", 1);
 }
 #endif
 
@@ -489,9 +486,7 @@ pgsk_shmem_startup(void)
 	{
 		/* First time through ... */
 #if PG_VERSION_NUM >= 90600
-		LWLockPadded *locks = GetNamedLWLockTranche("pg_stat_kcache");
-		pgsk->lock = &(locks[0]).lock;
-		pgsk->queryids_lock = &(locks[1]).lock;
+		pgsk->lock = &(GetNamedLWLockTranche("pg_stat_kcache"))->lock;
 #else
 		pgsk->lock = LWLockAssign();
 #endif
@@ -1087,11 +1082,7 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 
 #if PG_VERSION_NUM >= 90600
 		if (IsParallelWorker())
-		{
-			LWLockAcquire(pgsk->queryids_lock, LW_SHARED);
 			queryId = pgsk->queryids[ParallelLeaderBackendId];
-			LWLockRelease(pgsk->queryids_lock);
-		}
 		else
 #endif
 		queryId = queryDesc->plannedstmt->queryId;
