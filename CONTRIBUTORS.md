@@ -12,3 +12,4 @@
   * github user munakoiso
   * Christoph Berg
   * Sviatoslav Ermilin
+  * Vitaliy Kukharik

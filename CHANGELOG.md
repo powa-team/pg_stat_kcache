@@ -1,3 +1,10 @@
+## 2.2.3 (2024-01-24)
+
+**Miscellaneous**:
+
+  - Improve performance for workloads with a high number of clients (Julien
+    Rouhaud, thanks to Vitaliy Kukharik for the report)
+
 ## 2.2.2 (2023-08-01)
 
 **Miscellaneous**:
