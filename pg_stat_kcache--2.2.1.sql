@@ -2,7 +2,7 @@
 -- For license terms, see the LICENSE file.
 --
 -- Copyright (c) 2014-2017, Dalibo
--- Copyright (c) 2018-2023, The PoWA-team
+-- Copyright (c) 2018-2024, The PoWA-team
 
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION pg_stat_kcache" to load this file. \quit
