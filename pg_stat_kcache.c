@@ -90,6 +90,11 @@ typedef uint32 pgsk_queryid;
 #define TIMEVAL_DIFF(start, end) ((double) end.tv_sec + (double) end.tv_usec / 1000000.0) \
 	- ((double) start.tv_sec + (double) start.tv_usec / 1000000.0)
 
+#if PG_VERSION_NUM < 170000
+#define MyProcNumber MyBackendId
+#define ParallelLeaderProcNumber ParallelLeaderBackendId
+#endif
+
 #if PG_VERSION_NUM < 140000
 #define ParallelLeaderBackendId ParallelMasterBackendId
 #endif
@@ -431,7 +436,7 @@ pgsk_set_queryid(pgsk_queryid queryid)
 	/* Only the leader knows the queryid. */
 	Assert(!IsParallelWorker());
 
-	pgsk->queryids[MyBackendId] = queryid;
+	pgsk->queryids[MyProcNumber] = queryid;
 }
 #endif
 
@@ -1082,7 +1087,7 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 
 #if PG_VERSION_NUM >= 90600
 		if (IsParallelWorker())
-			queryId = pgsk->queryids[ParallelLeaderBackendId];
+			queryId = pgsk->queryids[ParallelLeaderProcNumber];
 		else
 #endif
 		queryId = queryDesc->plannedstmt->queryId;
