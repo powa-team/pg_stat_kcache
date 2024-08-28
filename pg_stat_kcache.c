@@ -92,12 +92,13 @@ typedef uint32 pgsk_queryid;
 
 #if PG_VERSION_NUM < 170000
 #define MyProcNumber MyBackendId
-#define ParallelLeaderProcNumber ParallelLeaderBackendId
 #endif
 
 #if PG_VERSION_NUM < 140000
 #define ParallelLeaderBackendId ParallelMasterBackendId
 #endif
+
+#define ParallelLeaderProcNumber ParallelLeaderBackendId
 
 #define PGSK_MAX_NESTED_LEVEL		64
 
