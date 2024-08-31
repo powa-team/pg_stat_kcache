@@ -63,6 +63,6 @@ typedef void (*pgsk_counters_hook_type) (
 		const char *query_string,
 		int level,
 		pgskStoreKind kind);
-pgsk_counters_hook_type pgsk_counters_hook = NULL;
+extern PGDLLIMPORT pgsk_counters_hook_type pgsk_counters_hook;
 
 #endif

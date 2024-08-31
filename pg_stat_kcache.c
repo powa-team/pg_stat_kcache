@@ -182,6 +182,10 @@ static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
 static pgskSharedState *pgsk = NULL;
 static HTAB *pgsk_hash = NULL;
 
+/*---- HOOK variables ----*/
+
+pgsk_counters_hook_type pgsk_counters_hook = NULL;
+
 /*---- GUC variables ----*/
 
 typedef enum
