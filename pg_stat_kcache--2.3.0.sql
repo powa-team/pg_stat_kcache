@@ -39,11 +39,13 @@ CREATE FUNCTION pg_stat_kcache(
     OUT exec_msgrcvs     bigint,             /* total IPC messages received */
     OUT exec_nsignals    bigint,             /* total signals received */
     OUT exec_nvcsws      bigint,             /* total voluntary context switches */
-    OUT exec_nivcsws     bigint              /* total involuntary context switches */
+    OUT exec_nivcsws     bigint,             /* total involuntary context switches */
+    /* metadata */
+    OUT stats_since     timestamptz         /* entry creation time */
 )
 RETURNS SETOF record
 LANGUAGE c COST 1000
-AS '$libdir/pg_stat_kcache', 'pg_stat_kcache_2_2';
+AS '$libdir/pg_stat_kcache', 'pg_stat_kcache_2_3';
 GRANT ALL ON FUNCTION pg_stat_kcache() TO public;
 
 CREATE FUNCTION pg_stat_kcache_reset()
@@ -81,7 +83,8 @@ SELECT s.query, k.top, d.datname, r.rolname,
        k.exec_msgrcvs,
        k.exec_nsignals,
        k.exec_nvcsws,
-       k.exec_nivcsws
+       k.exec_nivcsws,
+       k.stats_since
   FROM pg_stat_kcache() k
   JOIN pg_stat_statements s
     ON k.queryid = s.queryid AND k.dbid = s.dbid AND k.userid = s.userid
@@ -120,7 +123,8 @@ SELECT datname,
        SUM(exec_msgrcvs) AS exec_msgrcvs,
        SUM(exec_nsignals) AS exec_nsignals,
        SUM(exec_nvcsws) AS exec_nvcsws,
-       SUM(exec_nivcsws) AS exec_nivcsws
+       SUM(exec_nivcsws) AS exec_nivcsws,
+       MIN(stats_since) AS stats_since
   FROM pg_stat_kcache_detail
   WHERE top IS TRUE
   GROUP BY datname;
