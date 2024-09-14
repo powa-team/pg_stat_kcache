@@ -63,6 +63,7 @@
 #if PG_VERSION_NUM >= 160000
 #include "utils/pg_rusage.h"
 #endif
+#include "utils/timestamp.h"
 
 #include "pg_stat_kcache.h"
 
@@ -108,10 +109,12 @@ typedef enum pgskVersion
 {
 	PGSK_V2_0 = 0,
 	PGSK_V2_1,
-	PGSK_V2_2
+	PGSK_V2_2,
+	PGSK_V2_3
 } pgskVersion;
 
-static const uint32 PGSK_FILE_HEADER = 0x0d756e11;
+/* Magic number identifying the stats file format */
+static const uint32 PGSK_FILE_HEADER = 0x20240914;
 
 static struct	rusage exec_rusage_start[PGSK_MAX_NESTED_LEVEL];
 #if PG_VERSION_NUM >= 130000
@@ -140,6 +143,7 @@ typedef struct pgskEntry
 	pgskHashKey		key;		/* hash key of entry - MUST BE FIRST */
 	pgskCounters	counters[PGSK_NUMKIND];	/* statistics for this query */
 	slock_t			mutex;		/* protects the counters only */
+	TimestampTz		stats_since; /* timestamp of entry allocation */
 } pgskEntry;
 
 /*
@@ -215,11 +219,13 @@ extern PGDLLEXPORT Datum	pg_stat_kcache_reset(PG_FUNCTION_ARGS);
 extern PGDLLEXPORT Datum	pg_stat_kcache(PG_FUNCTION_ARGS);
 extern PGDLLEXPORT Datum	pg_stat_kcache_2_1(PG_FUNCTION_ARGS);
 extern PGDLLEXPORT Datum	pg_stat_kcache_2_2(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum	pg_stat_kcache_2_3(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pg_stat_kcache_reset);
 PG_FUNCTION_INFO_V1(pg_stat_kcache);
 PG_FUNCTION_INFO_V1(pg_stat_kcache_2_1);
 PG_FUNCTION_INFO_V1(pg_stat_kcache_2_2);
+PG_FUNCTION_INFO_V1(pg_stat_kcache_2_3);
 
 static void pg_stat_kcache_internal(FunctionCallInfo fcinfo, pgskVersion
 		api_version);
@@ -546,11 +552,13 @@ pgsk_shmem_startup(void)
 		if (fread(&temp, sizeof(pgskEntry), 1, file) != 1)
 			goto error;
 
+		/* make the hashtable entry (discards old entries if too many) */
 		entry = pgsk_entry_alloc(&temp.key);
 
 		/* copy in the actual stats */
 		entry->counters[0] = temp.counters[0];
 		entry->counters[1] = temp.counters[1];
+		entry->stats_since = temp.stats_since;
 		/* don't initialize spinlock, already done */
 	}
 
@@ -815,6 +823,7 @@ static pgskEntry *pgsk_entry_alloc(pgskHashKey *key)
 		entry->counters[0].usage = USAGE_INIT;
 		/* re-initialize the mutex each time ... we assume no one using it */
 		SpinLockInit(&entry->mutex);
+		entry->stats_since = GetCurrentTimestamp();
 	}
 
 	return entry;
@@ -1186,6 +1195,14 @@ pg_stat_kcache_2_2(PG_FUNCTION_ARGS)
 	return (Datum) 0;
 }
 
+PGDLLEXPORT Datum
+pg_stat_kcache_2_3(PG_FUNCTION_ARGS)
+{
+	pg_stat_kcache_internal(fcinfo, PGSK_V2_3);
+
+	return (Datum) 0;
+}
+
 static void
 pg_stat_kcache_internal(FunctionCallInfo fcinfo, pgskVersion api_version)
 {
@@ -1235,12 +1252,13 @@ pg_stat_kcache_internal(FunctionCallInfo fcinfo, pgskVersion api_version)
 	{
 		Datum			values[PG_STAT_KCACHE_COLS];
 		bool			nulls[PG_STAT_KCACHE_COLS];
-		pgskCounters	tmp;
+		volatile pgskCounters   *tmp;
 		int				i = 0;
 		int				kind, min_kind = 0;
 #ifdef HAVE_GETRUSAGE
 		int64			reads, writes;
 #endif
+		TimestampTz		stats_since;
 
 		memset(values, 0, sizeof(values));
 		memset(nulls, 0, sizeof(nulls));
@@ -1255,39 +1273,40 @@ pg_stat_kcache_internal(FunctionCallInfo fcinfo, pgskVersion api_version)
 		if (api_version < PGSK_V2_2)
 			min_kind = 1;
 
+		/* copy counters to a local variable to keep locking time short */
+		{
+			volatile pgskEntry *e = (volatile pgskEntry *) entry;
+
+			SpinLockAcquire(&e->mutex);
+			tmp = e->counters;
+			stats_since = e->stats_since;
+			SpinLockRelease(&e->mutex);
+		}
+
 		for (kind = min_kind; kind < PGSK_NUMKIND; kind++)
 		{
-			/* copy counters to a local variable to keep locking time short */
-			{
-				volatile pgskEntry *e = (volatile pgskEntry *) entry;
-
-				SpinLockAcquire(&e->mutex);
-				tmp = e->counters[kind];
-				SpinLockRelease(&e->mutex);
-			}
-
 #ifdef HAVE_GETRUSAGE
-			reads = tmp.reads * RUSAGE_BLOCK_SIZE;
-			writes = tmp.writes * RUSAGE_BLOCK_SIZE;
+			reads = tmp[kind].reads * RUSAGE_BLOCK_SIZE;
+			writes = tmp[kind].writes * RUSAGE_BLOCK_SIZE;
 			values[i++] = Int64GetDatumFast(reads);
 			values[i++] = Int64GetDatumFast(writes);
 #else
 			nulls[i++] = true; /* reads */
 			nulls[i++] = true; /* writes */
 #endif
-			values[i++] = Float8GetDatumFast(tmp.utime);
-			values[i++] = Float8GetDatumFast(tmp.stime);
+			values[i++] = Float8GetDatumFast(tmp[kind].utime);
+			values[i++] = Float8GetDatumFast(tmp[kind].stime);
 			if (api_version >= PGSK_V2_1)
 			{
 #ifdef HAVE_GETRUSAGE
-				values[i++] = Int64GetDatumFast(tmp.minflts);
-				values[i++] = Int64GetDatumFast(tmp.majflts);
-				values[i++] = Int64GetDatumFast(tmp.nswaps);
-				values[i++] = Int64GetDatumFast(tmp.msgsnds);
-				values[i++] = Int64GetDatumFast(tmp.msgrcvs);
-				values[i++] = Int64GetDatumFast(tmp.nsignals);
-				values[i++] = Int64GetDatumFast(tmp.nvcsws);
-				values[i++] = Int64GetDatumFast(tmp.nivcsws);
+				values[i++] = Int64GetDatumFast(tmp[kind].minflts);
+				values[i++] = Int64GetDatumFast(tmp[kind].majflts);
+				values[i++] = Int64GetDatumFast(tmp[kind].nswaps);
+				values[i++] = Int64GetDatumFast(tmp[kind].msgsnds);
+				values[i++] = Int64GetDatumFast(tmp[kind].msgrcvs);
+				values[i++] = Int64GetDatumFast(tmp[kind].nsignals);
+				values[i++] = Int64GetDatumFast(tmp[kind].nvcsws);
+				values[i++] = Int64GetDatumFast(tmp[kind].nivcsws);
 #else
 				nulls[i++] = true; /* minflts */
 				nulls[i++] = true; /* majflts */
@@ -1300,10 +1319,13 @@ pg_stat_kcache_internal(FunctionCallInfo fcinfo, pgskVersion api_version)
 #endif
 			}
 		}
+		if (api_version >= PGSK_V2_3)
+			values[i++] = TimestampTzGetDatum(stats_since);
 
 		Assert(i == (api_version == PGSK_V2_0 ? PG_STAT_KCACHE_COLS_V2_0 :
 					 api_version == PGSK_V2_1 ? PG_STAT_KCACHE_COLS_V2_1 :
 					 api_version == PGSK_V2_2 ? PG_STAT_KCACHE_COLS_V2_2 :
+					 api_version == PGSK_V2_3 ? PG_STAT_KCACHE_COLS_V2_3 :
 					 -1 /* fail if you forget to update this assert */ ));
 
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);

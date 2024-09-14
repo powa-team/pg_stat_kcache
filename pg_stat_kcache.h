@@ -4,7 +4,8 @@
 #define PG_STAT_KCACHE_COLS_V2_0    7
 #define PG_STAT_KCACHE_COLS_V2_1    15
 #define PG_STAT_KCACHE_COLS_V2_2    28
-#define PG_STAT_KCACHE_COLS         28 /* maximum of above */
+#define PG_STAT_KCACHE_COLS_V2_3    29
+#define PG_STAT_KCACHE_COLS         29 /* maximum of above */
 
 /* ru_inblock block size is 512 bytes with Linux
  * see http://lkml.indiana.edu/hypermail/linux/kernel/0703.2/0937.html
