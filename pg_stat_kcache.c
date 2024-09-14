@@ -156,13 +156,8 @@ typedef struct pgskSharedState
 
 /*---- Local variables ----*/
 
-/* Current nesting depth of ExecutorRun+ProcessUtility calls */
-static int	exec_nested_level = 0;
-
-#if PG_VERSION_NUM >= 130000
-/* Current nesting depth of planner calls */
-static int	plan_nested_level = 0;
-#endif
+/* Current nesting depth of planner/ExecutorRun/ProcessUtility calls */
+static int	nesting_level = 0;
 
 
 /* saved hook address in case of unload */
@@ -211,8 +206,6 @@ static bool pgsk_track_planning = false;	/* whether to track planning duration *
 #define pgsk_enabled(level) \
 	((pgsk_track == PGSK_TRACK_ALL && (level) < PGSK_MAX_NESTED_LEVEL) || \
 	(pgsk_track == PGSK_TRACK_TOP && (level) == 0))
-
-#define is_top(level) (level) == 0
 
 /*--- Functions --- */
 
@@ -263,7 +256,7 @@ static pgskEntry *pgsk_entry_alloc(pgskHashKey *key);
 static void pgsk_entry_dealloc(void);
 static void pgsk_entry_reset(void);
 static void pgsk_entry_store(pgsk_queryid queryId, pgskStoreKind kind,
-							 int level, pgskCounters counters);
+							 pgskCounters counters);
 static uint32 pgsk_hash_fn(const void *key, Size keysize);
 static int	pgsk_match_fn(const void *key1, const void *key2, Size keysize);
 
@@ -733,7 +726,7 @@ pgsk_queryids_array_size(void)
 
 static void
 pgsk_entry_store(pgsk_queryid queryId, pgskStoreKind kind,
-				 int level, pgskCounters counters)
+				 pgskCounters counters)
 {
 	volatile pgskEntry *e;
 
@@ -748,7 +741,7 @@ pgsk_entry_store(pgsk_queryid queryId, pgskStoreKind kind,
 	key.userid = GetUserId();
 	key.dbid = MyDatabaseId;
 	key.queryid = queryId;
-	key.top = is_top(level);
+	key.top = (nesting_level == 0);
 
 	/* Lookup the hash table entry with shared lock. */
 	LWLockAcquire(pgsk->lock, LW_SHARED);
@@ -918,28 +911,19 @@ pgsk_planner(Query *parse,
 {
 	PlannedStmt *result;
 
-	/*
-	 * We can't process the query if no queryid has been computed.
-	 *
-	 * Note that planner_hook can be called from the planner itself, so we
-	 * have a specific nesting level for the planner.  However, utility
-	 * commands containing optimizable statements can also call the planner,
-	 * same for regular DML (for instance for underlying foreign key queries).
-	 * So testing the planner nesting level only is not enough to detect real
-	 * top level planner call.
-	 */
-	if (pgsk_enabled(plan_nested_level + exec_nested_level)
+	/* We can't process the query if no queryid has been computed. */
+	if (pgsk_enabled(nesting_level)
 		&& pgsk_track_planning
 		&& parse->queryId != UINT64CONST(0))
 	{
-		struct rusage *rusage_start = &plan_rusage_start[plan_nested_level];
+		struct rusage *rusage_start = &plan_rusage_start[nesting_level];
 		struct rusage rusage_end;
 		pgskCounters counters;
 
 		/* capture kernel usage stats in rusage_start */
 		getrusage(RUSAGE_SELF, rusage_start);
 
-		plan_nested_level++;
+		nesting_level++;
 		PG_TRY();
 		{
 			if (prev_planner_hook)
@@ -948,11 +932,11 @@ pgsk_planner(Query *parse,
 			else
 				result = standard_planner(parse, query_string, cursorOptions,
 										  boundParams);
-			plan_nested_level--;
+			nesting_level--;
 		}
 		PG_CATCH();
 		{
-			plan_nested_level--;
+			nesting_level--;
 			PG_RE_THROW();
 		}
 		PG_END_TRY();
@@ -963,22 +947,38 @@ pgsk_planner(Query *parse,
 		pgsk_compute_counters(&counters, rusage_start, &rusage_end, NULL);
 
 		/* store current number of block reads and writes */
-		pgsk_entry_store(parse->queryId, PGSK_PLAN, plan_nested_level + exec_nested_level, counters);
+		pgsk_entry_store(parse->queryId, PGSK_PLAN, counters);
 
 		if (pgsk_counters_hook)
 		    pgsk_counters_hook(&counters,
 							   query_string,
-							   plan_nested_level + exec_nested_level,
+							   nesting_level,
 							   PGSK_PLAN);
 	}
 	else
 	{
-		if (prev_planner_hook)
-			result = prev_planner_hook(parse, query_string, cursorOptions,
-									   boundParams);
-		else
-			result = standard_planner(parse, query_string, cursorOptions,
-									  boundParams);
+		/*
+		 * Even though we're not tracking planning for this statement, we
+		 * must still increment the nesting level, to ensure that functions
+		 * evaluated during planning are not seen as top-level calls.
+		 */
+		nesting_level++;
+		PG_TRY();
+		{
+			if (prev_planner_hook)
+				result = prev_planner_hook(parse, query_string, cursorOptions,
+										   boundParams);
+			else
+				result = standard_planner(parse, query_string, cursorOptions,
+										  boundParams);
+			nesting_level--;
+		}
+		PG_CATCH();
+		{
+			nesting_level--;
+			PG_RE_THROW();
+		}
+		PG_END_TRY();
 	}
 
 	return result;
@@ -988,9 +988,9 @@ pgsk_planner(Query *parse,
 static void
 pgsk_ExecutorStart (QueryDesc *queryDesc, int eflags)
 {
-	if (pgsk_enabled(exec_nested_level))
+	if (pgsk_enabled(nesting_level))
 	{
-		struct rusage *rusage_start = &exec_rusage_start[exec_nested_level];
+		struct rusage *rusage_start = &exec_rusage_start[nesting_level];
 
 		/* capture kernel usage stats in rusage_start */
 		getrusage(RUSAGE_SELF, rusage_start);
@@ -1027,7 +1027,7 @@ pgsk_ExecutorRun(QueryDesc *queryDesc,
 #endif
 )
 {
-	exec_nested_level++;
+	nesting_level++;
 	PG_TRY();
 	{
 		if (prev_ExecutorRun)
@@ -1042,11 +1042,11 @@ pgsk_ExecutorRun(QueryDesc *queryDesc,
 #else
 			standard_ExecutorRun(queryDesc, direction, count);
 #endif
-		exec_nested_level--;
+		nesting_level--;
 	}
 	PG_CATCH();
 	{
-		exec_nested_level--;
+		nesting_level--;
 		PG_RE_THROW();
 	}
 	PG_END_TRY();
@@ -1058,18 +1058,18 @@ pgsk_ExecutorRun(QueryDesc *queryDesc,
 static void
 pgsk_ExecutorFinish(QueryDesc *queryDesc)
 {
-	exec_nested_level++;
+	nesting_level++;
 	PG_TRY();
 	{
 		if (prev_ExecutorFinish)
 			prev_ExecutorFinish(queryDesc);
 		else
 			standard_ExecutorFinish(queryDesc);
-		exec_nested_level--;
+		nesting_level--;
 	}
 	PG_CATCH();
 	{
-		exec_nested_level--;
+		nesting_level--;
 		PG_RE_THROW();
 	}
 	PG_END_TRY();
@@ -1082,9 +1082,9 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 	struct rusage rusage_end;
 	pgskCounters counters;
 
-	if (pgsk_enabled(exec_nested_level))
+	if (pgsk_enabled(nesting_level))
 	{
-		struct rusage *rusage_start = &exec_rusage_start[exec_nested_level];
+		struct rusage *rusage_start = &exec_rusage_start[nesting_level];
 
 		/* capture kernel usage stats in rusage_end */
 		getrusage(RUSAGE_SELF, &rusage_end);
@@ -1099,12 +1099,12 @@ pgsk_ExecutorEnd (QueryDesc *queryDesc)
 		pgsk_compute_counters(&counters, rusage_start, &rusage_end, queryDesc);
 
 		/* store current number of block reads and writes */
-		pgsk_entry_store(queryId, PGSK_EXEC, exec_nested_level, counters);
+		pgsk_entry_store(queryId, PGSK_EXEC, counters);
 
 		if (pgsk_counters_hook)
 		    pgsk_counters_hook(&counters,
 							   (const char *)queryDesc->sourceText,
-							   exec_nested_level,
+							   nesting_level,
 							   PGSK_EXEC);
 	}
 
