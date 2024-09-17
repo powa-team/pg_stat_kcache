@@ -1,3 +1,9 @@
+pg-stat-kcache (2.3.0-1) unstable; urgency=medium
+
+  * New upstream version.
+
+ -- Julien Rouhaud <rjuju123@gmail.com>  Tue, 17 Sep 2024 12:00:44 +0800
+
 pg-stat-kcache (2.2.3-1) unstable; urgency=medium
 
   * New upstream version.

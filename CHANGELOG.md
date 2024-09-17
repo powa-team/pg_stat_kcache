@@ -1,3 +1,19 @@
+## 2.3.0 (2024-09-17)
+
+**New features**:
+
+  - Track entry creation timestamp (Julien Rouhaud, thanks to Andrei Zubkov for
+    the feature request)
+
+**Bugfix**:
+
+  - Fix some issues with tracking nesting level (Julien Rouhaud)
+  - Fix the pgsk_counters_hook declaration (Julien Rouhaud)
+
+**Miscellaneous**:
+
+  - Add postgres 17 compatibility (Julien Rouhaud)
+
 ## 2.2.3 (2024-01-24)
 
 **Miscellaneous**:
