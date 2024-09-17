@@ -12,7 +12,7 @@
 
 **Miscellaneous**:
 
-  - Add postgres 17 compatibility (Julien Rouhaud)
+  - Add postgres 17 compatibility (Georgy Shelkovy)
 
 ## 2.2.3 (2024-01-24)
 

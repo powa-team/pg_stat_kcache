@@ -13,3 +13,4 @@
   * Christoph Berg
   * Sviatoslav Ermilin
   * Vitaliy Kukharik
+  * Georgy Shelkovy
