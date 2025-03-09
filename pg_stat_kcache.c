@@ -100,6 +100,14 @@ typedef uint32 pgsk_queryid;
 #define ParallelLeaderBackendId ParallelMasterBackendId
 #endif
 
+/* ExecutorStart hook */
+#if PG_VERSION_NUM >= 180000
+#define EXEC_START_RET bool
+#else
+#define EXEC_START_RET void
+#endif
+/* end of ExecutorStart hook */
+
 #define PGSK_MAX_NESTED_LEVEL		64
 
 /*
@@ -244,13 +252,7 @@ static PlannedStmt *pgsk_planner(Query *parse,
 								 int cursorOptions,
 								 ParamListInfo boundParams);
 #endif
-static
-#if PG_VERSION_NUM >= 180000
-bool
-#else
-void
-#endif
-pgsk_ExecutorStart(QueryDesc *queryDesc, int eflags);
+static EXEC_START_RET pgsk_ExecutorStart(QueryDesc *queryDesc, int eflags);
 static void pgsk_ExecutorRun(QueryDesc *queryDesc,
 				 ScanDirection direction,
 #if PG_VERSION_NUM >= 90600
@@ -1000,12 +1002,7 @@ pgsk_planner(Query *parse,
 }
 #endif
 
-static
-#if PG_VERSION_NUM >= 180000
-bool
-#else
-void
-#endif
+static EXEC_START_RET
 pgsk_ExecutorStart (QueryDesc *queryDesc, int eflags)
 {
 	if (pgsk_enabled(nesting_level))
