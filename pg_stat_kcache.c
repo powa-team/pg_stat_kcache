@@ -102,9 +102,9 @@ typedef uint32 pgsk_queryid;
 
 /* ExecutorStart hook */
 #if PG_VERSION_NUM >= 180000
-#define EXEC_START_RET bool
+#define EXEC_START_RET	bool
 #else
-#define EXEC_START_RET void
+#define EXEC_START_RET	void
 #endif
 /* end of ExecutorStart hook */
 
