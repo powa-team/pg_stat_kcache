@@ -7,8 +7,8 @@
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "ALTER EXTENSION pg_stat_kcache" to load this file. \quit
 
-DROP VIEW pg_stat_kcache_detail;
 DROP VIEW pg_stat_kcache;
+DROP VIEW pg_stat_kcache_detail;
 DROP FUNCTION pg_stat_kcache();
 
 CREATE FUNCTION pg_stat_kcache(
