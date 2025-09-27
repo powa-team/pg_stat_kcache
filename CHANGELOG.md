@@ -1,3 +1,14 @@
+## 2.3.1 (2025-09-27)
+
+**Bugfix**:
+
+  - Fix 2.2.3 -> 2.3.0 upgrade script (Julien Rouhaud, thanks to github user
+    1165125080 for the report)
+
+**Miscellaneous**:
+
+  - Add postgres 18 compatibility (Georgy Shelkovy, Julien Rouhaud)
+
 ## 2.3.0 (2024-09-17)
 
 **New features**:
