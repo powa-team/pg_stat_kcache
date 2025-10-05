@@ -58,3 +58,61 @@ jobs:
       if: ${{ failure() }}
       run: |
         cat regression.diffs
+
+    - name: Check extension install vs upgrade for postgres ${{ matrix.pgversion }}
+      run: |
+        # create default db
+        createdb -U postgres --maintenance-db postgres runner
+
+        # install dependencies
+        sudo apt-get install -y silversearcher-ag
+
+        # install rust
+        rustup toolchain install ${{ env.RUST }}
+
+        # install pg_validate_extupgrade
+        git clone https://github.com/rjuju/pg_validate_extupgrade.git
+        cd pg_validate_extupgrade
+        cargo build
+        cd ..
+
+        # pgsk depends on pg_stat_statements
+        psql -Xc "CREATE EXTENSION pg_stat_statements" postgres
+
+        # get the default extension version
+        to_ver=$(ag default_version pg_stat_kcache.control | ag -o "(\d+\.?)+")
+        echo "to_ver: ${to_ver}"
+
+        # Check the number of extension scripts containing the default versions
+        nb=$(ls *--*--${to_ver}.sql | wc -l)
+
+        # If only one sql script found with the default version, it should be a
+        # new major version that is allowed to no provide an upgrade script.
+        if [ ${nb} != 1 ]; then
+
+          echo "Could not find ugprade script for version ${to_ver}"
+          exit 1
+        fi
+
+        # get unix socket
+        socket=$(psql -c "SHOW unix_socket_directories")
+
+        # Get the previous version
+        from_ver=$(ls *--*--${to_ver}.sql \
+          | ag -o 'pg_stat_kcache--\d+\.\d+\.\d+' \
+          | ag -o "\d+\.\d+\.\d+")
+          echo "from_ver: ${from_ver}"
+
+        # Generate the config file
+        cat .github/pg_stat_kcache.toml.template \
+          | sed "s/%%FROM_VER%%/${from_ver}/" \
+          | sed "s/%%TO_VER%%/${to_ver}/" \
+          > pg_stat_kcache.toml
+
+        # Run pg_validate_extupgrade
+        echo "Running pg_validate_extupgrade..."
+        ./pg_validate_extupgrade/target/debug/pg_validate_extupgrade \
+          -d postgres \
+          -U postgres \
+          -h "${socket}" \
+          -c ./pg_stat_kcache.toml
