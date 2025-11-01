@@ -1,4 +1,4 @@
-name: Build
+name: Run pg_stat_kcache tests
 
 on:
   push:
@@ -8,9 +8,14 @@ on:
     branches:
       - master
 
+env:
+  DATADIR: /dev/shm/data
+  LOGFILE: /dev/shm/data/logfile
+
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  pg_stat_kcache_tests:
+    name: pg_stat_kcache_tests
+    runs-on: ${{ matrix.os }}
 
     defaults:
       run:
@@ -18,43 +23,87 @@ jobs:
 
     strategy:
       matrix:
-        pgversion:
-          - 9.4
-          - 9.5
-          - 9.6
-          - 10
-          - 11
-          - 12
-          - 13
-          - 14
-          - 15
-          - 16
-          - 17
-
-    env:
-      PGVERSION: ${{ matrix.pgversion }}
+        postgres_major_version: [
+          "9.4",
+          "9.5",
+          "9.6",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16"
+        ]
+        os: ["ubuntu-22.04"]
 
     steps:
-    - name: checkout
-      uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
-    - name: install pg
+    - name: Set up prerequisites and environment
       run: |
-        sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -v $PGVERSION -p -i
-        sudo -u postgres createuser -s "$USER"
+        echo "************ CLEAN IMAGE ***********"
+        sudo apt remove -y '^postgres.*' '^libpq.*'
+        echo ""
 
-    - name: build
-      run: |
-        make PROFILE="-Werror"
-        sudo -E make install
+        echo "********* REPOSITORY SET UP ********"
+        sudo apt-get install -y wget gnupg
+        sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+        wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+        sudo apt-get update -y -qq --fix-missing
+        echo ""
 
-    - name: test
-      run: |
-        sudo pg_conftool $PGVERSION main set shared_preload_libraries pg_stat_statements,pg_stat_kcache
-        sudo service postgresql restart
-        make installcheck
+        echo "*********** ENVIRONMENT ************"
+        export PG_MAJOR_VERSION=${{ matrix.postgres_major_version }}
+        echo "PG_MAJOR_VERSION=$PG_MAJOR_VERSION" >> $GITHUB_ENV
+        echo "MAKEFLAGS=$MAKEFLAGS -j $(grep -c ^processor /proc/cpuinfo)" >> $GITHUB_ENV
+        echo ""
 
-    - name: show regression diffs
-      if: ${{ failure() }}
+        echo "******** INSTALL POSTGRES **********"
+        sudo apt-get install -y \
+          postgresql-$PG_MAJOR_VERSION \
+          postgresql-server-dev-$PG_MAJOR_VERSION \
+          postgresql-contrib-$PG_MAJOR_VERSION
+        echo ""
+
+        echo "******* INSTALL DEPENDENCIES *******"
+        sudo apt-get install -y \
+          gcc \
+          make \
+          build-essential \
+          pkg-config
+        echo ""
+
+        echo "********** READJUST PATH ***********"
+        export PATH=$(pg_config --bindir):$PATH
+        echo "PATH=$PATH" >> $GITHUB_ENV
+        cat $GITHUB_ENV
+        echo ""
+
+    - name: Start a postgres ${{ matrix.postgres_major_version }} server
       run: |
-        cat regression.diffs
+        sudo chmod a+rwx /var/run/postgresql/
+        pg_ctl -D $DATADIR initdb
+        pg_ctl -D $DATADIR -l $LOGFILE start || cat $LOGFILE
+        # a sleep is required for pg9.6 (at least)
+        sleep 1
+        psql -c 'select 1 as ok' postgres
+
+    - name: Build and install pg_stat_kcache for postgres ${{ matrix.postgres_major_version }}
+      run: |
+        make
+        sudo make install
+
+    - name: Enable pg_stat_kcache on postgres ${{ matrix.postgres_major_version }} server
+      run: |
+        echo "shared_preload_libraries = 'pg_stat_statements,pg_stat_kcache'" >> $DATADIR/postgresql.conf
+        pg_ctl -D $DATADIR -l $LOGFILE restart || cat $LOGFILE
+        # a sleep is required for pg9.6 (at least)
+        sleep 1
+        psql -c 'select 1 as ok' postgres
+
+    - name: Run pg_stat_kcache tests for postgres ${{ matrix.postgres_major_version }}
+      run: make installcheck || ( errcode=$?; cat regression.diffs && exit $errcode )
+
+    - name: Stop the running postgres ${{ matrix.postgres_major_version }} server
+      run: pg_ctl -D $DATADIR stop
