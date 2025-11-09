@@ -1,0 +1,8 @@
+extname = 'pg_stat_kcache'
+schema = '"PgSK"'
+from = '%%FROM_VER%%'
+to = '%%TO_VER%%'
+extra_queries = [
+]
+pre_upgrade_queries = [
+]
