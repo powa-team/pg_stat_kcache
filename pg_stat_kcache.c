@@ -242,7 +242,11 @@ static void pgsk_shmem_shutdown(int code, Datum arg);
 static PlannedStmt *pgsk_planner(Query *parse,
 								 const char *query_string,
 								 int cursorOptions,
-								 ParamListInfo boundParams);
+								 ParamListInfo boundParams
+#if PG_VERSION_NUM >= 190000
+								 , ExplainState *es
+#endif
+								 );
 #endif
 static void pgsk_ExecutorStart(QueryDesc *queryDesc, int eflags);
 static void pgsk_ExecutorRun(QueryDesc *queryDesc,
@@ -916,7 +920,11 @@ static PlannedStmt *
 pgsk_planner(Query *parse,
 			 const char *query_string,
 			 int cursorOptions,
-			 ParamListInfo boundParams)
+			 ParamListInfo boundParams
+#if PG_VERSION_NUM >= 190000
+			 , ExplainState *es
+#endif
+)
 {
 	PlannedStmt *result;
 
@@ -937,10 +945,18 @@ pgsk_planner(Query *parse,
 		{
 			if (prev_planner_hook)
 				result = prev_planner_hook(parse, query_string, cursorOptions,
-										   boundParams);
+										   boundParams
+#if PG_VERSION_NUM >= 190000
+										   , es
+#endif
+										   );
 			else
 				result = standard_planner(parse, query_string, cursorOptions,
-										  boundParams);
+										  boundParams
+#if PG_VERSION_NUM >= 190000
+										  , es
+#endif
+										  );
 			nesting_level--;
 		}
 		PG_CATCH();
@@ -976,10 +992,18 @@ pgsk_planner(Query *parse,
 		{
 			if (prev_planner_hook)
 				result = prev_planner_hook(parse, query_string, cursorOptions,
-										   boundParams);
+										   boundParams
+#if PG_VERSION_NUM >= 190000
+										   , es
+#endif
+										   );
 			else
 				result = standard_planner(parse, query_string, cursorOptions,
-										  boundParams);
+										  boundParams
+#if PG_VERSION_NUM >= 190000
+										  , es
+#endif
+										  );
 			nesting_level--;
 		}
 		PG_CATCH();
