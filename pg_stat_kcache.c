@@ -407,6 +407,12 @@ pgsk_compute_counters(pgskCounters *counters,
 
 		if (queryDesc && queryDesc->totaltime)
 		{
+#if PG_VERSION_NUM >= 190000
+			double		total = INSTR_TIME_GET_MILLISEC(queryDesc->totaltime->total);
+#else
+			double		total = queryDesc->totaltime->total;
+#endif
+
 			/* Make sure stats accumulation is done */
 			InstrEndLoop(queryDesc->totaltime);
 
@@ -414,10 +420,10 @@ pgsk_compute_counters(pgskCounters *counters,
 			 * We only consider values greater than 3 * linux tick, otherwise the
 			 * bias is too big
 			 */
-			if (queryDesc->totaltime->total < (3. / pgsk_linux_hz))
+			if (total < (3. / pgsk_linux_hz))
 			{
 				counters->stime = 0;
-				counters->utime = queryDesc->totaltime->total;
+				counters->utime = total;
 			}
 		}
 
