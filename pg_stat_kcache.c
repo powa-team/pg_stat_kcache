@@ -408,7 +408,7 @@ pgsk_compute_counters(pgskCounters *counters,
 		if (queryDesc && queryDesc->totaltime)
 		{
 #if PG_VERSION_NUM >= 190000
-			double		total = INSTR_TIME_GET_MILLISEC(queryDesc->totaltime->total);
+			double		total = (double) INSTR_TIME_GET_NANOSEC(queryDesc->totaltime->total);
 #else
 			double		total = queryDesc->totaltime->total;
 #endif
