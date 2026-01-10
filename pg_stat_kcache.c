@@ -407,14 +407,16 @@ pgsk_compute_counters(pgskCounters *counters,
 
 		if (queryDesc && queryDesc->totaltime)
 		{
-#if PG_VERSION_NUM >= 190000
-			double		total = (double) INSTR_TIME_GET_NANOSEC(queryDesc->totaltime->total);
-#else
-			double		total = queryDesc->totaltime->total;
-#endif
+			float8		total;
 
 			/* Make sure stats accumulation is done */
 			InstrEndLoop(queryDesc->totaltime);
+
+#if PG_VERSION_NUM >= 190000
+			total = INSTR_TIME_GET_DOUBLE(queryDesc->totaltime->total);
+#else
+			total = queryDesc->totaltime->total;
+#endif
 
 			/*
 			 * We only consider values greater than 3 * linux tick, otherwise the
