@@ -27,7 +27,7 @@ For Debian/Ubuntu::
 
 and RHEL/Rocky::
 
-  yum install pg_stat_kcacheXY
+  yum install pg_stat_kcache_XY
 
 or for PostgreSQL 11 and above::
 
