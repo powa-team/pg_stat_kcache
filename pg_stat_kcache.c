@@ -43,6 +43,7 @@
 #include "access/parallel.h"
 #endif
 #include "executor/executor.h"
+#include "executor/instrument.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #if PG_VERSION_NUM >= 130000
@@ -57,6 +58,7 @@
 #endif
 #include "storage/fd.h"
 #include "storage/ipc.h"
+#include "storage/lwlock.h"
 #include "storage/spin.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
@@ -64,6 +66,7 @@
 #include "utils/pg_rusage.h"
 #endif
 #include "utils/timestamp.h"
+#include "utils/tuplestore.h"
 
 #include "pg_stat_kcache.h"
 
@@ -90,6 +93,22 @@ typedef uint32 pgsk_queryid;
 
 #define TIMEVAL_DIFF(start, end) ((double) end.tv_sec + (double) end.tv_usec / 1000000.0) \
 	- ((double) start.tv_sec + (double) start.tv_usec / 1000000.0)
+
+#if PG_VERSION_NUM < 190000
+/*
+ * pg19 changed the init/max size to a single fixed size, so simulate that
+ * behavior for older versions.
+ */
+#define ShmemInitHash(n, nelem, i, f) ShmemInitHash(n, nelem, nelem, i, f)
+
+/*
+ * pg19 renamed Instrumentation->totaltime to query_instr
+ *
+ * It's a bit of a hack to handle the rename with a macro but there isn't much
+ * code here so it avoids additional complications without much risks.
+ */
+#define query_instr totaltime
+#endif
 
 #if PG_VERSION_NUM < 170000
 #define MyProcNumber MyBackendId
@@ -405,19 +424,27 @@ pgsk_compute_counters(pgskCounters *counters,
 		counters->utime = TIMEVAL_DIFF(rusage_start->ru_utime, rusage_end->ru_utime);
 		counters->stime = TIMEVAL_DIFF(rusage_start->ru_stime, rusage_end->ru_stime);
 
-		if (queryDesc && queryDesc->totaltime)
+		if (queryDesc && queryDesc->query_instr)
 		{
+			double		total;
+
+#if PG_VERSION_NUM < 190000
 			/* Make sure stats accumulation is done */
-			InstrEndLoop(queryDesc->totaltime);
+			InstrEndLoop(queryDesc->query_instr);
+
+			total = queryDesc->query_instr->total;
+#else
+			total = INSTR_TIME_GET_DOUBLE(queryDesc->query_instr->total);
+#endif
 
 			/*
 			 * We only consider values greater than 3 * linux tick, otherwise the
 			 * bias is too big
 			 */
-			if (queryDesc->totaltime->total < (3. / pgsk_linux_hz))
+			if (total < (3. / pgsk_linux_hz))
 			{
 				counters->stime = 0;
-				counters->utime = queryDesc->totaltime->total;
+				counters->utime = total;
 			}
 		}
 
@@ -515,7 +542,7 @@ pgsk_shmem_startup(void)
 
 	/* allocate stats shared memory hash */
 	pgsk_hash = ShmemInitHash("pg_stat_kcache hash",
-							  pgsk_max, pgsk_max,
+							  pgsk_max,
 							  &info,
 							  HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
 
