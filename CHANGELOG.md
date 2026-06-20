@@ -1,3 +1,10 @@
+## 2.3.2 (2025-09-28)
+
+**Miscellaneous**:
+
+  - Add postgres 19 compatibility (Georgy Shelkovy, Julien Rouhaud)
+  -  Fix installation command on RHEL/Rocky/Alma (Pierre Forstmann)
+
 ## 2.3.1 (2025-09-27)
 
 **Bugfix**:
